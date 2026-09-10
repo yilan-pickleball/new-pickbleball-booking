@@ -22,7 +22,7 @@
 
 <div id="app" class="max-w-md md:max-w-xl mx-auto min-h-screen bg-white shadow-xl flex flex-col relative">
 
-  <!-- 頂部：幹部狀態與首頁捷徑 -->
+  <!-- 頂部：幹部狀態列與首頁捷徑 -->
   <header class="bg-slate-900 text-white px-4 py-3 sticky top-0 z-30 shadow-md">
     <div class="flex items-center justify-between">
       <div class="flex items-center space-x-2.5">
@@ -39,7 +39,7 @@
           <p class="text-[10px] text-slate-400 font-mono">UID: {{ formatUid(adminProfile.userId) }}</p>
         </div>
       </div>
-      <!-- 測試切換 -->
+      <!-- 測試切換按鈕 -->
       <button 
         @click="isAdminApproved = !isAdminApproved" 
         class="text-xs bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded text-slate-300 border border-slate-600 transition"
@@ -49,7 +49,7 @@
     </div>
   </header>
 
-  <!-- 情況 A：非委員會管理員攔截門禁 -->
+  <!-- 情況 A：非委員會人員攔截門禁 -->
   <main v-if="!isAdminApproved" class="flex-1 p-6 flex flex-col justify-center">
     <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm text-center space-y-4">
       <div class="w-14 h-14 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto text-2xl font-bold">
@@ -128,7 +128,7 @@
             <p v-if="req.notes" class="text-slate-500">💬 備註：{{ req.notes }}</p>
           </div>
 
-          <!-- 意向名單與教練指派 -->
+          <!-- 教練指派選單 -->
           <div class="space-y-1.5 pt-1">
             <div class="flex justify-between items-center text-xs">
               <label class="font-bold text-slate-700">指派授課教練：</label>
@@ -156,13 +156,13 @@
             </select>
           </div>
 
-          <!-- 衝堂檢核警示 -->
+          <!-- 衝堂警告 -->
           <div v-if="checkConflict(req.assignedCoach, req.preferredDate, req.timeSlot)" class="p-2 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 flex items-center space-x-1.5">
             <span>⚠️</span>
             <span><strong>衝堂警告：</strong> {{ req.assignedCoach }} 在該時段已有其他排定課程！</span>
           </div>
 
-          <!-- 撮合確認按鈕 (衝堂防呆鎖定) -->
+          <!-- 撮合確認按鈕 -->
           <button 
             @click="confirmMatch(req)"
             :disabled="!req.assignedCoach || checkConflict(req.assignedCoach, req.preferredDate, req.timeSlot)"
@@ -233,27 +233,37 @@
         </button>
       </div>
 
-      <!-- 進行中正式排程總覽與強制取消 -->
+      <!-- 正式排程總覽 -->
       <div class="space-y-3 pt-2">
-        <h2 class="text-sm font-bold text-slate-800">已排程課程總覽 ({{ activeMatches.length }})</h2>
-        <div v-for="m in activeMatches" :key="m.matId" class="p-3 bg-white border border-slate-200 rounded-xl space-y-2 text-xs">
+        <h2 class="text-sm font-bold text-slate-800">已排程課程總覽 ({{ allMatches.length }})</h2>
+        <div v-for="m in allMatches" :key="m.matId" class="p-3 bg-white border border-slate-200 rounded-xl space-y-2 text-xs">
           <div class="flex justify-between items-center">
             <span class="font-mono font-bold text-purple-700">{{ m.matId }}</span>
-            <span class="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full text-[10px]">
-              {{ m.status === 'Confirmed' ? '排定中' : '已完課' }}
+            <span 
+              :class="{
+                'bg-amber-100 text-amber-800': m.status === 'Confirmed',
+                'bg-emerald-100 text-emerald-800': m.status === 'Completed',
+                'bg-purple-100 text-purple-800': m.status === 'Settled'
+              }"
+              class="font-bold px-2 py-0.5 rounded-full text-[10px]"
+            >
+              {{ m.status === 'Confirmed' ? '排定中' : (m.status === 'Completed' ? '教練已簽到完課' : '💰 已核銷結清') }}
             </span>
           </div>
           <p class="font-bold text-slate-900">{{ m.studentName }} ↔ {{ m.coachNames }}</p>
-          <p class="text-slate-500">📅 {{ m.lessonDate }} ({{ m.lessonTime }}) 📍 {{ m.venue }}</p>
+          <p class="text-slate-500">📅 {{ m.date || m.lessonDate }} ({{ m.timeSlot || m.lessonTime }}) 📍 {{ m.venue }}</p>
           
           <div class="pt-1 flex space-x-2">
+            <!-- 幹部也可代為完課 -->
             <button 
-              @click="markCompleted(m)"
+              v-if="m.status === 'Confirmed'"
+              @click="markCompletedAdmin(m)"
               class="flex-1 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded font-semibold border border-emerald-200"
             >
-              標註完課 (進入記帳)
+              代為標註完課
             </button>
             <button 
+              v-if="m.status === 'Confirmed'"
               @click="forceCancel(m)"
               class="py-1.5 px-3 bg-red-50 text-red-600 hover:bg-red-100 rounded font-semibold border border-red-200"
             >
@@ -271,11 +281,9 @@
         <p class="text-xs text-slate-500 mt-0.5">免手打 UID 一鍵審核教練與幹部資格</p>
       </div>
 
-      <!-- 待審核教練申請 -->
+      <!-- 待審核教練 -->
       <div class="space-y-3">
-        <h2 class="text-sm font-bold text-slate-800 flex items-center justify-between">
-          <span>待審核教練 ({{ pendingCoaches.length }})</span>
-        </h2>
+        <h2 class="text-sm font-bold text-slate-800">待審核教練 ({{ pendingCoaches.length }})</h2>
         <div v-if="pendingCoaches.length === 0" class="py-4 text-center text-slate-400 text-xs bg-slate-50 rounded-xl">
           目前無待審核教練
         </div>
@@ -302,11 +310,9 @@
         </div>
       </div>
 
-      <!-- 待審核幹部申請 -->
+      <!-- 待審核幹部 -->
       <div class="space-y-3 pt-3 border-t border-slate-200">
-        <h2 class="text-sm font-bold text-slate-800 flex items-center justify-between">
-          <span>待審核委員會幹部 ({{ pendingAdmins.length }})</span>
-        </h2>
+        <h2 class="text-sm font-bold text-slate-800">待審核委員會幹部 ({{ pendingAdmins.length }})</h2>
         <div v-if="pendingAdmins.length === 0" class="py-4 text-center text-slate-400 text-xs bg-slate-50 rounded-xl">
           目前無新幹部申請
         </div>
@@ -324,27 +330,74 @@
       </div>
     </section>
 
-    <!-- Tab 4: 結課均分記帳工作台 -->
+    <!-- Tab 4: 結課均分記帳工作台 (完全連動教練完課回報) -->
     <section v-if="currentTab === 'accounting'" class="space-y-4">
       <div class="border-b pb-3">
         <h1 class="text-xl font-bold text-slate-900">課堂均分記帳模組</h1>
-        <p class="text-xs text-slate-500 mt-0.5">完課後一鍵核算實收學費、扣除場地費與均分教練薪資</p>
+        <p class="text-xs text-slate-500 mt-0.5">讀取教練完課簽到回報，一鍵扣除場地費並均分教練薪資</p>
       </div>
 
-      <!-- 記帳試算卡片 -->
+      <!-- 核心試算卡片 -->
       <div class="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 text-xs">
-        <h2 class="font-bold text-slate-900 text-sm">課堂收支試算</h2>
+        <div class="flex justify-between items-center">
+          <h2 class="font-bold text-slate-900 text-sm">課堂收支試算</h2>
+          <span class="text-[11px] text-purple-700 font-bold bg-purple-100 px-2 py-0.5 rounded-full">
+            待核銷: {{ completedMatches.length }} 筆
+          </span>
+        </div>
+
+        <!-- 選擇完課訂單下拉選單 -->
+        <div class="space-y-1">
+          <label class="font-bold text-slate-700 block">選擇待核銷完課訂單 (MAT-) <span class="text-red-500">*</span></label>
+          <select 
+            v-model="selectedMatId" 
+            @change="onSelectMatch"
+            class="w-full px-3 py-2.5 border border-purple-300 rounded-lg text-xs bg-white font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none"
+          >
+            <option value="">-- 請下拉選取已簽到之完課紀錄 --</option>
+            <option v-for="m in completedMatches" :key="m.matId" :value="m.matId">
+              {{ m.matId }} | {{ m.studentName }} | {{ m.date }}
+            </option>
+          </select>
+        </div>
+
+        <!-- 若無完課單時的提示與測試小按鈕 -->
+        <div v-if="completedMatches.length === 0" class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 space-y-1">
+          <p>⚠️ 目前無教練簽到完成的待核銷訂單。</p>
+          <button @click="loadMockCompleted" class="text-xs text-blue-700 underline font-semibold">
+            點此載入 1 筆測試完課紀錄
+          </button>
+        </div>
+
+        <!-- 帶入之課程資訊摘要 -->
+        <div v-if="currentSelectedMatch" class="p-2.5 bg-purple-50/70 border border-purple-200 rounded-lg space-y-1 text-slate-700">
+          <p>🏸 課程：<strong>{{ currentSelectedMatch.courseTitle }}</strong></p>
+          <p>👤 學員：{{ currentSelectedMatch.studentName }} ({{ currentSelectedMatch.venue }})</p>
+          <p>👥 執教教練名單：<strong class="text-purple-800">{{ calcForm.coachNames }}</strong></p>
+        </div>
+
+        <!-- 金額試算輸入列 -->
         <div class="grid grid-cols-2 gap-2">
           <div class="space-y-1">
             <label class="font-bold text-slate-700">實收學費總額 (NT$)</label>
-            <input type="number" v-model.number="calcForm.revenue" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
+            <input 
+              type="number" 
+              v-model.number="calcForm.revenue" 
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white font-bold text-emerald-700 focus:outline-none"
+            >
           </div>
           <div class="space-y-1">
             <label class="font-bold text-slate-700">實付場地費 (NT$)</label>
-            <input type="number" v-model.number="calcForm.venueCost" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
+            <input 
+              type="number" 
+              v-model.number="calcForm.venueCost" 
+              placeholder="輸入發票支出"
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white font-bold text-red-600 focus:outline-none"
+            >
           </div>
         </div>
 
+        <!-- 出勤教練人數按鈕 -->
         <div class="space-y-1">
           <label class="font-bold text-slate-700">出勤教練人數</label>
           <div class="flex space-x-2">
@@ -353,51 +406,54 @@
               :key="num"
               type="button"
               @click="calcForm.coachCount = num"
-              :class="calcForm.coachCount === num ? 'bg-purple-700 text-white font-bold' : 'bg-white text-slate-700 border'"
-              class="flex-1 py-1.5 rounded-lg text-xs"
+              :class="calcForm.coachCount === num ? 'bg-purple-700 text-white font-bold' : 'bg-white text-slate-700 border border-slate-200'"
+              class="flex-1 py-1.5 rounded-lg text-xs transition"
             >
               {{ num }} 位教練
             </button>
           </div>
         </div>
 
-        <!-- 即時計算結果 -->
-        <div class="bg-white p-3 rounded-lg border border-purple-200 space-y-1 text-xs">
-          <div class="flex justify-between">
+        <!-- 即時核算結果框 (對齊截圖風格) -->
+        <div class="bg-white p-3 rounded-lg border border-purple-200 space-y-1.5 text-xs">
+          <div class="flex justify-between items-center">
             <span class="text-slate-500">教練分配總酬勞：</span>
-            <strong class="text-slate-900">NT$ {{ (calcForm.revenue - calcForm.venueCost).toLocaleString() }}</strong>
+            <strong class="text-slate-900 text-sm">NT$ {{ netCoachPool.toLocaleString() }}</strong>
           </div>
-          <div class="flex justify-between text-purple-700 font-bold text-sm pt-1 border-t border-slate-100">
+          <div class="flex justify-between items-center text-purple-700 font-bold text-sm pt-1 border-t border-slate-100">
             <span>每位教練實得：</span>
-            <span>NT$ {{ perCoachPay.toLocaleString() }}</span>
+            <span class="text-base">NT$ {{ perCoachPay.toLocaleString() }}</span>
           </div>
         </div>
 
+        <!-- 確認送出核銷 -->
         <button 
           @click="generateAccountingSlip" 
-          class="w-full py-2.5 bg-purple-700 hover:bg-purple-800 text-white font-bold rounded-lg text-xs transition"
+          :disabled="!selectedMatId"
+          :class="!selectedMatId ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-purple-700 hover:bg-purple-800 text-white shadow-md shadow-purple-700/20'"
+          class="w-full py-3 rounded-xl font-bold text-xs transition"
         >
           確認核銷並生成記帳單 (ACC-)
         </button>
       </div>
 
-      <!-- 記帳流水紀錄 -->
+      <!-- 最近核銷紀錄 -->
       <div class="space-y-2 pt-2">
-        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider">最近核銷紀錄</h3>
-        <div v-for="acc in accountingLogs" :key="acc.accId" class="p-3 bg-white border border-slate-200 rounded-xl space-y-1 text-xs">
+        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider">最近核銷紀錄 ({{ accountingLogs.length }})</h3>
+        <div v-for="acc in accountingLogs" :key="acc.accId" class="p-3 bg-white border border-slate-200 rounded-xl space-y-1 text-xs shadow-sm">
           <div class="flex justify-between items-center">
             <span class="font-mono font-bold text-purple-700">{{ acc.accId }}</span>
             <span class="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full">已結清</span>
           </div>
-          <p class="text-slate-800">收入 ${{ acc.revenue }} - 場地 ${{ acc.venueCost }} = 酬勞 ${{ acc.pool }}</p>
-          <p class="text-slate-500 text-[11px]">執教：{{ acc.coachNames }} (每人 ${{ acc.perPay }})</p>
+          <p class="text-slate-800">收入 NT${{ acc.revenue.toLocaleString() }} - 場地 NT${{ acc.venueCost.toLocaleString() }} = 酬勞 NT${{ acc.pool.toLocaleString() }}</p>
+          <p class="text-slate-500 text-[11px]">執教：{{ acc.coachNames }} (每人 NT${{ acc.perPay.toLocaleString() }})</p>
         </div>
       </div>
     </section>
 
   </main>
 
-  <!-- 底部導航欄 (Tab Bar) -->
+  <!-- 底部導航欄 -->
   <nav v-if="isAdminApproved" class="bg-white border-t border-slate-200 fixed bottom-0 left-0 right-0 max-w-md md:max-w-xl mx-auto z-30 flex">
     <button 
       @click="currentTab = 'matching'" 
@@ -432,10 +488,14 @@
     <button 
       @click="currentTab = 'accounting'" 
       :class="currentTab === 'accounting' ? 'text-purple-700 font-bold' : 'text-slate-400 hover:text-slate-600'"
-      class="flex-1 py-2.5 flex flex-col items-center justify-center text-xs transition"
+      class="flex-1 py-2.5 flex flex-col items-center justify-center text-xs transition relative"
     >
       <span class="text-lg">💰</span>
       <span class="text-[10px] mt-0.5">均分記帳</span>
+      <!-- 動態紅點：有待核銷訂單時提醒 -->
+      <span v-if="completedMatches.length > 0" class="absolute top-1.5 right-4 w-4 h-4 bg-emerald-600 text-white rounded-full text-[9px] flex items-center justify-center font-bold">
+        {{ completedMatches.length }}
+      </span>
     </button>
   </nav>
 
@@ -444,24 +504,21 @@
 <script>
   const { createApp, ref, reactive, computed, onMounted } = Vue;
 
-  // ⚠️ 未來向 LINE Developers 申請 LIFF ID 後填入
   const ADMIN_LIFF_ID = "";
 
   createApp({
     setup() {
-      // 1. 創世管理員資訊
       const adminProfile = reactive({
         userId: 'Ud857f472593d4263cdf8353f1e34ef88',
         name: '杜和益 (創世幹部)'
       });
 
-      const isAdminApproved = ref(true); // 預設已核准
-      const currentTab = ref('matching');
+      const isAdminApproved = ref(true);
+      const currentTab = ref('accounting'); // 進入預設可直奔均分記帳驗收
 
-      // 合格教練清單
       const approvedCoaches = ref(['杜和益 教練', '王教練', '李教練']);
 
-      // 2. 待撮合學員需求 (Mock Data)
+      // 待撮合學員需求池
       const pendingRequests = ref([
         {
           reqId: 'REQ-20260910-001',
@@ -473,42 +530,44 @@
           timeSlot: '上午 (09:00-12:00)',
           venuePreference: '宜蘭國民運動中心',
           designatedCoach: '杜和益 教練',
-          notes: '加強反手抽球',
+          notes: '加強反手截擊',
           interestedCoaches: ['杜和益 教練'],
           assignedCoach: '杜和益 教練',
           assignedVenue: '宜蘭國民運動中心'
-        },
-        {
-          reqId: 'REQ-20260910-002',
-          studentName: '林小姐等4人',
-          courseType: '初階團體培訓班',
-          studentCount: 4,
-          level: '1.0-2.0',
-          preferredDate: '2026-09-18',
-          timeSlot: '晚上 (18:00-21:00)',
-          venuePreference: '宜蘭運動公園風雨光電球場',
-          designatedCoach: '',
-          notes: '純新手',
-          interestedCoaches: ['王教練'],
-          assignedCoach: '王教練',
-          assignedVenue: '宜蘭運動公園風雨光電球場'
         }
       ]);
 
-      // 3. 已排程正式訂單 (Mock Data)
-      const activeMatches = ref([
+      // 總課表清單（與教練端完全同步）
+      const allMatches = ref([
         {
-          matId: 'MAT-20260910-001',
-          studentName: '張先生',
+          matId: 'MAT-20260915-001',
+          courseTitle: '進階精緻單堂課 (2人)',
+          studentName: '杜小明 等 2 人',
           coachNames: '杜和益 教練',
-          lessonDate: '2026-09-15',
-          lessonTime: '上午 (09:00-12:00)',
+          date: '2026-09-15',
+          timeSlot: '09:00-10:00',
           venue: '宜蘭國民運動中心',
+          expectedFee: 1400,
+          actualRevenue: 1400,
+          coachCount: 1,
+          status: 'Completed' // 預載為已簽到完課，方便立即測試下拉記帳
+        },
+        {
+          matId: 'MAT-20260918-002',
+          courseTitle: '初階團體培訓班 (4人成班)',
+          studentName: '林小姐等4人',
+          coachNames: '杜和益 教練、王教練',
+          date: '2026-09-18',
+          timeSlot: '18:00-19:00',
+          venue: '宜蘭運動公園風雨光電球場',
+          expectedFee: 6000,
+          actualRevenue: 6000,
+          coachCount: 2,
           status: 'Confirmed'
         }
       ]);
 
-      // 4. 白名單待審核清單 (Mock Data)
+      // 白名單待審核
       const pendingCoaches = ref([
         { uid: 'U998877665544', displayName: '張大榮', realName: '', dupr: '3.65' }
       ]);
@@ -516,7 +575,7 @@
         { uid: 'U112233445566', displayName: '陳幹事' }
       ]);
 
-      // 5. 代客提單表單模型
+      // 長輩代客表單
       const proxyForm = reactive({
         studentName: '',
         courseType: '初階團體培訓班',
@@ -526,26 +585,58 @@
         designatedCoach: ''
       });
 
-      // 6. 均分記帳表單模型
+      // 篩選出所有「已完課簽到・待核銷」的訂單
+      const completedMatches = computed(() => {
+        return allMatches.value.filter(m => m.status === 'Completed');
+      });
+
+      // 當前選中的完課單號
+      const selectedMatId = ref('');
+      const currentSelectedMatch = ref(null);
+
+      // 記帳試算表單
       const calcForm = reactive({
-        revenue: 2800,
+        revenue: 0,
         venueCost: 600,
-        coachCount: 2
+        coachCount: 1,
+        coachNames: ''
       });
 
+      // 下拉選中完課紀錄時，自動帶入學費與教練人數
+      function onSelectMatch() {
+        const found = allMatches.value.find(m => m.matId === selectedMatId.value);
+        if (found) {
+          currentSelectedMatch.value = found;
+          calcForm.revenue = found.actualRevenue || found.expectedFee || 1400;
+          calcForm.coachCount = found.coachCount || 1;
+          calcForm.coachNames = found.coachNames || '未登錄教練';
+        } else {
+          currentSelectedMatch.value = null;
+          calcForm.revenue = 0;
+          calcForm.coachNames = '';
+        }
+      }
+
+      // 可分配教練酬勞總額
+      const netCoachPool = computed(() => {
+        const pool = calcForm.revenue - calcForm.venueCost;
+        return pool > 0 ? pool : 0;
+      });
+
+      // 每位教練實發金額
       const perCoachPay = computed(() => {
-        const net = calcForm.revenue - calcForm.venueCost;
-        return calcForm.coachCount > 0 ? Math.round(net / calcForm.coachCount) : 0;
+        return calcForm.coachCount > 0 ? Math.round(netCoachPool.value / calcForm.coachCount) : 0;
       });
 
+      // 歷史核銷記帳紀錄
       const accountingLogs = ref([
         {
           accId: 'ACC-20260909-001',
-          revenue: 3000,
+          revenue: 2800,
           venueCost: 600,
-          pool: 2400,
+          pool: 2200,
           coachNames: '杜和益、王教練',
-          perPay: 1200
+          perPay: 1100
         }
       ]);
 
@@ -559,35 +650,39 @@
         return d.toISOString().split('T')[0];
       }
 
-      // 衝堂檢核防呆
+      // 衝堂檢核
       function checkConflict(coachName, date, timeSlot) {
         if (!coachName) return false;
-        return activeMatches.value.some(m => 
-          m.coachNames.includes(coachName) && 
-          m.lessonDate === date && 
-          m.lessonTime === timeSlot &&
+        return allMatches.value.some(m => 
+          m.coachNames && m.coachNames.includes(coachName) && 
+          m.date === date && 
+          m.timeSlot === timeSlot &&
           m.status === 'Confirmed'
         );
       }
 
-      // 確認撮合
+      // 撮合確認
       function confirmMatch(req) {
         const newMatId = `MAT-20260910-${Math.floor(100 + Math.random() * 900)}`;
-        activeMatches.value.unshift({
+        allMatches.value.unshift({
           matId: newMatId,
+          courseTitle: req.courseType,
           studentName: req.studentName,
           coachNames: req.assignedCoach,
-          lessonDate: req.preferredDate,
-          lessonTime: req.timeSlot,
+          date: req.preferredDate,
+          timeSlot: req.timeSlot,
           venue: req.assignedVenue,
+          expectedFee: req.courseType.includes('初階') ? 6000 : 1400,
+          actualRevenue: req.courseType.includes('初階') ? 6000 : 1400,
+          coachCount: 1,
           status: 'Confirmed'
         });
-        // 自待處理池中移除
         pendingRequests.value = pendingRequests.value.filter(r => r.reqId !== req.reqId);
+        syncStorage();
         alert(`撮合排程成功！生成訂單單號：${newMatId}`);
       }
 
-      // 建立代客預約
+      // 代客提單
       function submitProxyBooking() {
         if (!proxyForm.studentName) {
           alert('請輸入學員稱呼！');
@@ -604,20 +699,25 @@
           timeSlot: proxyForm.timeSlot,
           venuePreference: '由委員會協調',
           designatedCoach: proxyForm.designatedCoach,
-          notes: '委員會口頭受託登記',
+          notes: '口頭受託預約',
           interestedCoaches: [],
           assignedCoach: proxyForm.designatedCoach || '',
           assignedVenue: '宜蘭國民運動中心'
         });
-        alert(`已建立代客需求單號：${newReqId}，已匯入撮合池！`);
+        alert(`已建立代客需求單號：${newReqId}`);
         proxyForm.studentName = '';
         currentTab.value = 'matching';
       }
 
-      // 標註完課
-      function markCompleted(match) {
+      // 幹部代為標註完課
+      function markCompletedAdmin(match) {
         match.status = 'Completed';
-        alert(`單號 ${match.matId} 已完課，請至「均分記帳」分頁清算收支！`);
+        match.actualRevenue = match.expectedFee || 1400;
+        syncStorage();
+        alert(`單號 ${match.matId} 已標記完課！請切換至「均分記帳」分頁清算收支。`);
+        currentTab.value = 'accounting';
+        selectedMatId.value = match.matId;
+        onSelectMatch();
       }
 
       // 代客取消
@@ -625,8 +725,8 @@
         const reason = prompt('請輸入強制取消原因（如：宜蘭強降雨球場濕滑、學員突發事故）：');
         if (reason) {
           match.status = 'Cancelled_Admin';
-          activeMatches.value = activeMatches.value.filter(m => m.matId !== match.matId);
-          alert(`單號 ${match.matId} 已代客取消並釋出場地！原因：${reason}`);
+          syncStorage();
+          alert(`單號 ${match.matId} 已強制取消！原因：${reason}`);
         }
       }
 
@@ -634,31 +734,69 @@
       function approveCoach(coach) {
         approvedCoaches.value.push(coach.displayName);
         pendingCoaches.value = pendingCoaches.value.filter(c => c.uid !== coach.uid);
-        alert(`已核准 ${coach.displayName} 成為正式授課教練！`);
+        alert(`已核准 ${coach.displayName} 成為授課教練！`);
       }
 
       function rejectCoach(coach) {
         pendingCoaches.value = pendingCoaches.value.filter(c => c.uid !== coach.uid);
       }
 
-      // 授權幹部
       function approveAdmin(admin) {
         pendingAdmins.value = pendingAdmins.value.filter(a => a.uid !== admin.uid);
         alert(`已核准 ${admin.displayName} 成為委員會幹部！`);
       }
 
-      // 生成記帳單
+      // 生成記帳單並結案 (核心功能)
       function generateAccountingSlip() {
+        if (!selectedMatId.value || !currentSelectedMatch.value) {
+          alert('請先下拉選取待核銷的完課單號！');
+          return;
+        }
+
         const newAccId = `ACC-20260910-${Math.floor(100 + Math.random() * 900)}`;
+        
+        // 1. 新增記帳流水
         accountingLogs.value.unshift({
           accId: newAccId,
+          matId: selectedMatId.value,
           revenue: calcForm.revenue,
           venueCost: calcForm.venueCost,
-          pool: calcForm.revenue - calcForm.venueCost,
-          coachNames: '當日執教教練',
+          pool: netCoachPool.value,
+          coachNames: calcForm.coachNames,
           perPay: perCoachPay.value
         });
-        alert(`記帳成功！傳票單號：${newAccId}`);
+
+        // 2. 將該課堂正式改為「已核銷結清 (Settled)」
+        currentSelectedMatch.value.status = 'Settled';
+        syncStorage();
+
+        alert(`核銷成功！\n生成傳票單號：${newAccId}\n單號 ${selectedMatId.value} 狀態已轉為已結算！`);
+
+        // 3. 重置下拉選單
+        selectedMatId.value = '';
+        currentSelectedMatch.value = null;
+        calcForm.revenue = 0;
+      }
+
+      function loadMockCompleted() {
+        allMatches.value.unshift({
+          matId: `MAT-20260910-${Math.floor(100 + Math.random() * 900)}`,
+          courseTitle: '進階單堂課 (2人)',
+          studentName: '陳大文 等 2 人',
+          coachNames: '杜和益 教練',
+          date: '2026-09-10',
+          timeSlot: '14:00-15:00',
+          venue: '宜蘭國民運動中心',
+          expectedFee: 1400,
+          actualRevenue: 1400,
+          coachCount: 1,
+          status: 'Completed'
+        });
+        syncStorage();
+      }
+
+      function syncStorage() {
+        localStorage.setItem('pickle_matches', JSON.stringify(allMatches.value));
       }
 
       function copyUid() {
@@ -678,17 +816,20 @@
         if (savedUid) adminProfile.userId = savedUid;
         if (savedName) adminProfile.name = savedName;
 
-        if (ADMIN_LIFF_ID && typeof liff !== 'undefined') {
+        // 讀取教練端同步過來的排程與簽到狀態
+        const savedMatches = localStorage.getItem('pickle_matches');
+        if (savedMatches) {
           try {
-            await liff.init({ liffId: ADMIN_LIFF_ID });
-            if (liff.isLoggedIn()) {
-              const profile = await liff.getProfile();
-              adminProfile.userId = profile.userId;
-              adminProfile.name = profile.displayName;
-            }
-          } catch (e) {
-            console.warn('委員會 LIFF 初始化失敗:', e);
-          }
+            allMatches.value = JSON.parse(savedMatches);
+          } catch(e) {}
+        } else {
+          syncStorage();
+        }
+
+        // 預設選中第一筆完課紀錄
+        if (completedMatches.value.length > 0) {
+          selectedMatId.value = completedMatches.value[0].matId;
+          onSelectMatch();
         }
       });
 
@@ -698,23 +839,29 @@
         currentTab,
         approvedCoaches,
         pendingRequests,
-        activeMatches,
+        allMatches,
+        completedMatches,
+        selectedMatId,
+        currentSelectedMatch,
         pendingCoaches,
         pendingAdmins,
         proxyForm,
         calcForm,
+        netCoachPool,
         perCoachPay,
         accountingLogs,
         formatUid,
         checkConflict,
         confirmMatch,
         submitProxyBooking,
-        markCompleted,
+        markCompletedAdmin,
         forceCancel,
         approveCoach,
         rejectCoach,
         approveAdmin,
+        onSelectMatch,
         generateAccountingSlip,
+        loadMockCompleted,
         copyUid,
         applyForAdmin
       };
