@@ -8,7 +8,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Vue 3 CDN -->
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  <!-- LINE LIFF SDK (已補上) -->
+  <!-- LINE LIFF SDK -->
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <!-- Google Fonts: Inter & Noto Sans TC -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -24,11 +24,15 @@
 
 <div id="app" class="max-w-md mx-auto min-h-screen bg-white shadow-xl flex flex-col relative">
 
-  <!-- 頂部：LINE 身分狀態列 -->
+  <!-- 頂部：狀態列與回首頁捷徑 -->
   <header class="bg-emerald-700 text-white px-4 py-3 sticky top-0 z-30 shadow-md">
     <div class="flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <div class="w-10 h-10 rounded-full border-2 border-emerald-300 overflow-hidden bg-white/20 flex items-center justify-center font-bold text-lg">
+      <div class="flex items-center space-x-2.5">
+        <!-- 回首頁按鈕 -->
+        <a href="index.html" class="w-8 h-8 rounded-lg bg-emerald-800/80 hover:bg-emerald-600 flex items-center justify-center text-sm font-bold border border-emerald-500/50 transition" title="回首頁">
+          🏠
+        </a>
+        <div class="w-9 h-9 rounded-full border-2 border-emerald-300 overflow-hidden bg-white/20 flex items-center justify-center font-bold text-sm">
           {{ userProfile.name.charAt(0) }}
         </div>
         <div>
@@ -39,7 +43,7 @@
           <p class="text-[11px] text-emerald-100 font-mono">UID: {{ formatUid(userProfile.userId) }}</p>
         </div>
       </div>
-      <button @click="loadStudentData" class="text-xs bg-emerald-800/80 hover:bg-emerald-900 px-2.5 py-1.5 rounded-lg text-emerald-100 border border-emerald-600 transition flex items-center space-x-1">
+      <button @click="loadStudentData" class="text-xs bg-emerald-800/80 hover:bg-emerald-900 px-2 py-1.5 rounded-lg text-emerald-100 border border-emerald-600 transition flex items-center space-x-1">
         <span>🔄 重新整理</span>
       </button>
     </div>
@@ -191,7 +195,7 @@
         </div>
       </div>
 
-      <!-- 指定教練與場地偏好 -->
+      <!-- 指定教練 (動態連動試算表教練名冊) 與場地偏好 -->
       <div class="grid grid-cols-1 gap-3">
         <div class="space-y-1.5">
           <label class="text-sm font-bold text-slate-700">指定教練 (選填)</label>
@@ -200,9 +204,7 @@
             class="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
           >
             <option value="不指定(由委員會推薦)">不指定 (由委員會為您推薦合適教練)</option>
-            <option value="杜和益 教練">杜和益 教練</option>
-            <option value="王教練">王教練 (進階單打)</option>
-            <option value="李教練">李教練 (雙打截擊戰術)</option>
+            <option v-for="c in coachList" :key="c" :value="c">{{ c }}</option>
           </select>
           <p class="text-[11px] text-slate-400">💡 指定教練享有 24 小時專屬優先接單權</p>
         </div>
@@ -317,7 +319,6 @@
           :key="b.id"
           class="p-4 bg-white border border-slate-200 rounded-xl shadow-sm relative overflow-hidden"
         >
-          <!-- 頂部單號與狀態 -->
           <div class="flex justify-between items-center pb-2 border-b border-slate-100">
             <span class="font-mono text-xs font-bold text-slate-600">{{ b.id }}</span>
             <span :class="getStatusBadgeClass(b.status)" class="text-[10px] font-bold px-2 py-0.5 rounded-full">
@@ -325,7 +326,6 @@
             </span>
           </div>
 
-          <!-- 預約詳情 -->
           <div class="mt-3 space-y-1.5 text-xs text-slate-600">
             <p class="text-slate-900 font-bold text-sm">{{ b.courseTitle }}</p>
             <p>📅 時間：{{ b.date }} ({{ b.timeSlot }})</p>
@@ -334,10 +334,7 @@
             <p class="text-emerald-700 font-semibold">💵 現金應繳：NT$ {{ Number(b.fee || 1500).toLocaleString() }} (現場支付)</p>
           </div>
 
-          <!-- 動作列 -->
           <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between space-x-2">
-            
-            <!-- Confirmed 狀態：加入行事曆按鈕 -->
             <button 
               v-if="b.status === 'Confirmed'"
               @click="addToCalendar(b)"
@@ -346,9 +343,7 @@
               <span>📅 加入 Google 日曆</span>
             </button>
 
-            <!-- 24 小時自主取消機制 -->
             <template v-if="b.status === 'Pending' || b.status === 'Interested' || b.status === 'Confirmed'">
-              <!-- >= 24h 可取消 -->
               <button 
                 v-if="canCancelSelf(b.date)"
                 @click="cancelBooking(b)"
@@ -356,7 +351,6 @@
               >
                 取消預約
               </button>
-              <!-- < 24h 鎖定置灰 -->
               <div v-else class="text-right">
                 <button disabled class="px-3 py-2 bg-slate-100 text-slate-400 rounded-lg text-xs cursor-not-allowed">
                   不可線上取消
@@ -371,7 +365,7 @@
 
   </main>
 
-  <!-- 底部導航欄 (Tab Bar) -->
+  <!-- 底部導航欄 -->
   <nav class="bg-white border-t border-slate-200 fixed bottom-0 left-0 right-0 max-w-md mx-auto z-30 flex">
     <button 
       @click="currentTab = 'request'" 
@@ -440,36 +434,34 @@
 <script>
   const { createApp, ref, computed, reactive, onMounted } = Vue;
 
-  // 專屬 Google Apps Script API 部署網址
   const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwe_Xh7I8iOMDBK278mvBIIeXaVa9B3qz8bl2RfdEFT0elPW9Ff7Vg3p2sHm3COUdfkmA/exec";
   const MY_LIFF_ID = "2011535009-IsC8f5XW"; 
 
   createApp({
     setup() {
-      // 1. LINE 身分識別
       const userProfile = reactive({
-        userId: 'Ud857f472593d4263cdf8353f1e34ef88',
+        userId: 'Ud471b1a7217b649b3599b54700d352c9',
         name: '杜和益 (學員)'
       });
 
       const currentTab = ref('request');
       const isSubmitting = ref(false);
 
-      // 宜蘭在地預設兩大球場
+      // 動態教練清單 (預設含杜和益，後續由試算表取得真實名冊)
+      const coachList = ref(['杜和益 教練']);
+
       const defaultVenues = [
         '宜蘭國民運動中心',
         '宜蘭運動公園風雨光電球場',
         '由委員會協調'
       ];
 
-      // 時段選項
       const timeSlotOptions = [
         { label: '上午', time: '09:00-12:00', value: '上午 (09:00-12:00)' },
         { label: '下午', time: '14:00-17:00', value: '下午 (14:00-17:00)' },
         { label: '晚上', time: '18:00-21:00', value: '晚上 (18:00-21:00)' }
       ];
 
-      // 程度選項
       const levelOptions = [
         { val: '1.0-2.0', title: '1.0 - 2.0', desc: '初學新手' },
         { val: '2.5', title: '2.5', desc: '基礎對打' },
@@ -477,7 +469,6 @@
         { val: '3.5+', title: '3.5+', desc: '競技戰術' }
       ];
 
-      // 表單資料模型
       const form = reactive({
         courseType: 'basic',
         studentCount: 4,
@@ -489,16 +480,13 @@
         notes: ''
       });
 
-      // 2. 即時從試算表載入的資料池
       const availableSlots = ref([]);
       const myBookings = ref([]);
 
-      // 計算進行中的預約筆數 (Pending / Interested / Confirmed)
       const activeBookingsCount = computed(() => {
         return myBookings.value.filter(b => b.status === 'Pending' || b.status === 'Interested' || b.status === 'Confirmed').length;
       });
 
-      // 彈窗狀態
       const successModal = reactive({
         show: false,
         reqId: '',
@@ -508,9 +496,7 @@
         fee: 0
       });
 
-      // 初始化載入
       onMounted(async () => {
-        // LIFF 初始化
         if (MY_LIFF_ID && typeof liff !== 'undefined') {
           try {
             await liff.init({ liffId: MY_LIFF_ID });
@@ -522,21 +508,28 @@
             userProfile.userId = profile.userId;
             userProfile.name = profile.displayName;
           } catch (err) {
-            console.warn('LIFF 載入失敗，採用預設展示身分:', err);
+            console.warn('LIFF 載入失敗，採用預設身分:', err);
           }
         }
 
-        // 從 Google 試算表載入最新資料
         await loadStudentData();
       });
 
-      // 從 Google Apps Script 取得最新空檔與個人預約
+      // 從後端 GAS 同步空檔、個人預約以及動態教練名冊
       async function loadStudentData() {
         try {
           const res = await fetch(`${GAS_API_URL}?action=getStudentData&uid=${userProfile.userId}`);
           const data = await res.json();
           if (data.status === 'success') {
-            // 更新空檔池
+            // 1. 動態更新認證教練下拉選單
+            if (data.approvedCoaches && data.approvedCoaches.length > 0) {
+              coachList.value = data.approvedCoaches;
+            } else if (data.openSlots && data.openSlots.length > 0) {
+              const uniqueCoaches = [...new Set(data.openSlots.map(s => s.coachName))];
+              if (uniqueCoaches.length > 0) coachList.value = uniqueCoaches;
+            }
+
+            // 2. 更新開放空檔
             availableSlots.value = (data.openSlots || []).map(s => ({
               slotId: s.slotId,
               coachName: s.coachName,
@@ -545,7 +538,7 @@
               venue: s.venueOption
             }));
 
-            // 更新個人預約紀錄 (整合 Matches 與 Requests)
+            // 3. 更新個人預約紀錄
             const combined = [];
             (data.myMatches || []).forEach(m => {
               combined.push({
@@ -574,11 +567,10 @@
             myBookings.value = combined;
           }
         } catch (err) {
-          console.error('資料同步失敗:', err);
+          console.error('學員端資料同步失敗:', err);
         }
       }
 
-      // 計算費用
       function calculateFee() {
         if (form.courseType === 'basic') return 1500;
         return form.studentCount <= 2 ? 1400 : 1500;
@@ -596,7 +588,6 @@
 
       const minDate = computed(() => getTomorrowDate());
 
-      // 送出預約 (真實寫入 Google 試算表)
       async function submitRequest() {
         if (activeBookingsCount.value >= 2) {
           alert('您已有 2 筆進行中預約，已達上限！');
@@ -644,13 +635,12 @@
             alert('提單失敗：' + result.message);
           }
         } catch (err) {
-          alert('連線失敗，請檢查網路狀態：' + err.toString());
+          alert('連線失敗：' + err.toString());
         } finally {
           isSubmitting.value = false;
         }
       }
 
-      // 直接挑選教練空檔 (透過 API 提單)
       async function bookSlot(slot) {
         if (activeBookingsCount.value >= 2) {
           alert('您已有 2 筆進行中預約，已達上限！');
@@ -698,7 +688,6 @@
         }
       }
 
-      // 檢查是否距開課 >= 24 小時
       function canCancelSelf(lessonDateStr) {
         if (!lessonDateStr) return false;
         const lessonDate = new Date(lessonDateStr + 'T09:00:00');
@@ -707,7 +696,6 @@
         return diffHours >= 24;
       }
 
-      // 學員線上自主取消 (真實更新 Google 試算表)
       async function cancelBooking(booking) {
         if (!confirm(`確定要取消預約單號 ${booking.id} 嗎？`)) return;
 
@@ -735,7 +723,6 @@
         }
       }
 
-      // 加入 Google 日曆
       function addToCalendar(booking) {
         const title = encodeURIComponent(`匹克球課程: ${booking.courseTitle}`);
         const details = encodeURIComponent(`單號: ${booking.id}\n執教教練: ${booking.coach}\n應備現金: NT$ ${booking.fee}`);
@@ -745,7 +732,6 @@
         window.open(gcalUrl, '_blank');
       }
 
-      // 關閉 LIFF 視窗
       function simulateCloseWindow() {
         if (typeof liff !== 'undefined' && liff.isInClient()) {
           liff.closeWindow();
@@ -754,7 +740,6 @@
         }
       }
 
-      // 標籤樣式
       function getStatusBadgeClass(status) {
         switch(status) {
           case 'Pending': return 'bg-amber-100 text-amber-800';
@@ -783,6 +768,7 @@
         userProfile,
         currentTab,
         isSubmitting,
+        coachList,
         defaultVenues,
         timeSlotOptions,
         levelOptions,
