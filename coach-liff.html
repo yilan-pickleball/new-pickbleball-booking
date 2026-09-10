@@ -4,13 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>匹克球教學工作台 - 教練端</title>
-  <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Vue 3 CDN -->
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  <!-- LINE LIFF SDK -->
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <!-- Google Noto Sans TC 字型 -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -24,7 +20,7 @@
 
 <div id="app" class="max-w-md mx-auto min-h-screen bg-white shadow-xl flex flex-col relative">
 
-  <!-- 頂部：教練狀態列與身分模擬切換 -->
+  <!-- 頂部狀態列 -->
   <header class="bg-blue-800 text-white px-4 py-3 sticky top-0 z-30 shadow-md">
     <div class="flex items-center justify-between">
       <div class="flex items-center space-x-2.5">
@@ -59,7 +55,7 @@
     </div>
   </header>
 
-  <!-- 情況 A：非白名單攔截視圖 (Gatekeeper) -->
+  <!-- 非白名單攔截視圖 -->
   <main v-if="!isApproved" class="flex-1 p-5 flex flex-col justify-center">
     <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm text-center space-y-4">
       <div class="w-14 h-14 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto text-2xl font-bold">
@@ -70,7 +66,6 @@
         <p class="text-xs text-slate-500 mt-1">本平台教練端採白名單審核制，請提交申請或聯繫委員會幹部開通。</p>
       </div>
 
-      <!-- 極簡申請表單 -->
       <div class="text-left space-y-3 pt-2">
         <div class="space-y-1">
           <label class="text-xs font-bold text-slate-600">LINE 登記暱稱 (自動帶入)</label>
@@ -108,14 +103,14 @@
     </div>
   </main>
 
-  <!-- 情況 B：白名單教練專屬工作台 (已授權) -->
+  <!-- 白名單教練工作台 -->
   <main v-else class="flex-1 p-4 overflow-y-auto">
 
-    <!-- Tab 1: 登記授課空檔 -->
+    <!-- Tab 1: 登記授課空檔 (24小時制) -->
     <section v-if="currentTab === 'slots'" class="space-y-5">
       <div class="border-b pb-3">
         <h1 class="text-xl font-bold text-slate-900">開放授課空檔</h1>
-        <p class="text-xs text-slate-500 mt-0.5">釋出您可教學的時間，學員可在前端直接預約</p>
+        <p class="text-xs text-slate-500 mt-0.5">釋出您可教學的具體時間，學員可在前端直接預約</p>
       </div>
 
       <div class="space-y-1.5">
@@ -129,20 +124,29 @@
       </div>
 
       <div class="space-y-1.5">
-        <label class="text-sm font-bold text-slate-700">開放時段區間 <span class="text-red-500">*</span></label>
-        <div class="grid grid-cols-3 gap-2">
-          <button 
-            v-for="time in timeOptions" 
-            :key="time.val"
-            type="button"
-            @click="slotForm.timeSlot = time.val"
-            :class="slotForm.timeSlot === time.val ? 'bg-blue-600 text-white font-semibold' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'"
-            class="py-2.5 rounded-lg text-xs transition"
-          >
-            <div>{{ time.label }}</div>
-            <div class="text-[10px] opacity-80">{{ time.range }}</div>
-          </button>
+        <label class="text-sm font-bold text-slate-700">開放授課時間 (24小時制) <span class="text-red-500">*</span></label>
+        <div class="grid grid-cols-2 gap-3 items-center">
+          <div>
+            <span class="text-xs text-slate-500 block mb-1">開始時間</span>
+            <select 
+              v-model="slotForm.startTime" 
+              @change="onSlotStartTimeChange" 
+              class="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white font-mono font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            >
+              <option v-for="t in timeOptions.slice(0, -1)" :key="t" :value="t">{{ t }}</option>
+            </select>
+          </div>
+          <div>
+            <span class="text-xs text-slate-500 block mb-1">結束時間</span>
+            <select 
+              v-model="slotForm.endTime" 
+              class="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white font-mono font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            >
+              <option v-for="t in validSlotEndTimes" :key="t" :value="t">{{ t }}</option>
+            </select>
+          </div>
         </div>
+        <p class="text-[11px] text-blue-700 font-medium mt-1">⏰ 開放時段：<strong>{{ slotForm.startTime }} - {{ slotForm.endTime }}</strong></p>
       </div>
 
       <div class="space-y-1.5">
@@ -184,7 +188,7 @@
           >
             <div>
               <span class="font-mono text-[10px] text-blue-700 font-bold bg-blue-100 px-1.5 py-0.5 rounded mr-1.5">{{ s.slotId }}</span>
-              <strong class="text-slate-800">{{ s.slotDate || s.date }} {{ s.timeSlot }}</strong>
+              <strong class="text-slate-800 font-mono">{{ s.slotDate || s.date }} ({{ s.timeSlot }})</strong>
               <p class="text-[11px] text-slate-500 mt-0.5">📍 {{ s.venueOption || s.venue }}</p>
             </div>
             <span class="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">
@@ -195,7 +199,7 @@
       </div>
     </section>
 
-    <!-- Tab 2: 學員需求認領 (意向池) -->
+    <!-- Tab 2: 學員需求認領 -->
     <section v-if="currentTab === 'requests'" class="space-y-4">
       <div class="border-b pb-3">
         <h1 class="text-xl font-bold text-slate-900">學員求課需求池</h1>
@@ -236,7 +240,7 @@
 
           <div class="bg-slate-50 p-2.5 rounded-lg text-xs text-slate-600 space-y-1">
             <p>🏸 班型：<strong>{{ req.courseType }} ({{ req.studentCount }}人)</strong></p>
-            <p>📅 期望時間：{{ req.preferredDate }} ({{ req.timeSlot }})</p>
+            <p>📅 期望時間：<strong class="font-mono">{{ req.preferredDate }} ({{ req.timeSlot }})</strong></p>
             <p>📍 期望球場：{{ req.venuePreference }}</p>
             <p>🎯 匹克球程度：{{ req.level }}</p>
             <p v-if="req.notes" class="text-[11px] text-slate-500">💬 備註：{{ req.notes }}</p>
@@ -276,7 +280,7 @@
       </div>
     </section>
 
-    <!-- Tab 3: 我的執教課表 (含完課簽到功能) -->
+    <!-- Tab 3: 我的課表 (含完課簽到) -->
     <section v-if="currentTab === 'schedule'" class="space-y-4">
       <div class="border-b pb-3">
         <h1 class="text-xl font-bold text-slate-900">我的正式課表</h1>
@@ -309,7 +313,7 @@
 
           <div class="text-xs text-slate-600 space-y-1">
             <p class="text-sm font-bold text-slate-900">{{ m.courseType }}</p>
-            <p>📅 上課時間：<strong class="text-slate-800">{{ m.lessonDate }} ({{ m.lessonTime }})</strong></p>
+            <p>📅 上課時間：<strong class="text-slate-800 font-mono">{{ m.lessonDate }} ({{ m.lessonTime }})</strong></p>
             <p>📍 上課場地：<strong>{{ m.venue }}</strong></p>
             <p>👤 上課學員：{{ m.studentName }}</p>
             <p class="text-blue-700 font-semibold">💵 應收現金學費：NT$ {{ Number(m.expectedFee || 1400).toLocaleString() }}</p>
@@ -341,7 +345,6 @@
 
   </main>
 
-  <!-- 完課簽到彈窗 Modal -->
   <div v-if="checkinModal.show" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl p-5 max-w-sm w-full shadow-2xl space-y-4">
       <div class="text-center">
@@ -399,7 +402,6 @@
     </div>
   </div>
 
-  <!-- 底部導航欄 (Tab Bar) -->
   <nav v-if="isApproved" class="bg-white border-t border-slate-200 fixed bottom-0 left-0 right-0 max-w-md mx-auto z-30 flex">
     <button 
       @click="currentTab = 'slots'" 
@@ -438,6 +440,13 @@
   const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwe_Xh7I8iOMDBK278mvBIIeXaVa9B3qz8bl2RfdEFT0elPW9Ff7Vg3p2sHm3COUdfkmA/exec";
   const COACH_LIFF_ID = "2011535009-IsC8f5XW"; 
 
+  const TIME_OPTIONS = [
+    '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30',
+    '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30',
+    '15:00', '15:30', '16:00', '16:30', '17:00', '17:30', '18:00', '18:30',
+    '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00'
+  ];
+
   createApp({
     setup() {
       const isApproved = ref(true);
@@ -463,17 +472,28 @@
         '由委員會協調'
       ];
 
-      const timeOptions = [
-        { label: '上午時段', range: '09:00-12:00', val: '上午 (09:00-12:00)' },
-        { label: '下午時段', range: '14:00-17:00', val: '下午 (14:00-17:00)' },
-        { label: '晚上時段', range: '18:00-21:00', val: '晚上 (18:00-21:00)' }
-      ];
+      const timeOptions = TIME_OPTIONS;
 
       const slotForm = reactive({
         date: getTomorrowDate(),
-        timeSlot: '上午 (09:00-12:00)',
+        startTime: '18:00',
+        endTime: '19:00',
         venueOption: '宜蘭國民運動中心'
       });
+
+      const validSlotEndTimes = computed(() => {
+        const startIndex = TIME_OPTIONS.indexOf(slotForm.startTime);
+        return TIME_OPTIONS.slice(startIndex + 1);
+      });
+
+      function onSlotStartTimeChange() {
+        const startIndex = TIME_OPTIONS.indexOf(slotForm.startTime);
+        if (startIndex + 2 < TIME_OPTIONS.length) {
+          slotForm.endTime = TIME_OPTIONS[startIndex + 2];
+        } else if (startIndex + 1 < TIME_OPTIONS.length) {
+          slotForm.endTime = TIME_OPTIONS[startIndex + 1];
+        }
+      }
 
       const mySlots = ref([]);
       const studentRequests = ref([]);
@@ -542,7 +562,6 @@
         }
       }
 
-      // ⭐ 提交審核申請：完成後提示並自動跳回入口首頁
       async function submitCoachApplication() {
         isApplying.value = true;
         try {
@@ -560,10 +579,7 @@
             body: JSON.stringify(payload)
           });
           const result = await res.json();
-          
           alert(result.message || '教練申請已成功送出！請等候委員會核准。現在將為您返回首頁。');
-          
-          // ⭐ 自動導回身分選擇入口首頁
           window.location.href = 'index.html';
         } catch (err) {
           alert('連線失敗：' + err.toString());
@@ -574,13 +590,14 @@
 
       async function publishSlot() {
         isPublishing.value = true;
+        const timeSlotString = `${slotForm.startTime} - ${slotForm.endTime}`;
         try {
           const payload = {
             action: 'submitCoachSlot',
             coachUid: userProfile.userId,
             coachName: cleanCoachName.value,
             slotDate: slotForm.date,
-            timeSlot: slotForm.timeSlot,
+            timeSlot: timeSlotString,
             venueOption: slotForm.venueOption
           };
           const res = await fetch(GAS_API_URL, {
@@ -668,7 +685,15 @@
         const details = encodeURIComponent(`單號: ${match.matId}\n學員: ${match.studentName}`);
         const location = encodeURIComponent(match.venue);
         const dateClean = (match.lessonDate || '').replace(/-/g, '');
-        const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&location=${location}&dates=${dateClean}T090000/${dateClean}T100000`;
+        
+        let startT = '090000';
+        let endT = '100000';
+        if (match.lessonTime && match.lessonTime.includes('-')) {
+          const parts = match.lessonTime.split('-');
+          startT = parts[0].trim().replace(':', '') + '00';
+          endT = parts[1].trim().replace(':', '') + '00';
+        }
+        const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&location=${location}&dates=${dateClean}T${startT}/${dateClean}T${endT}`;
         window.open(gcalUrl, '_blank');
       }
 
@@ -684,10 +709,9 @@
             userProfile.userId = profile.userId;
             userProfile.name = profile.displayName + ' (教練)';
           } catch (e) {
-            console.warn('教練 LIFF 初始化異常，使用預設教練身分:', e);
+            console.warn('教練 LIFF 初始化異常，使用預設身分:', e);
           }
         }
-
         await loadCoachData();
       });
 
@@ -698,6 +722,8 @@
         applyForm,
         slotForm,
         timeOptions,
+        validSlotEndTimes,
+        onSlotStartTimeChange,
         defaultVenues,
         mySlots,
         studentRequests,
