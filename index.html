@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>宜蘭市體育會匹克球教學預約媒合平台</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Vue 3 CDN -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <!-- LINE LIFF SDK -->
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <!-- Google Fonts: Noto Sans TC -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Noto Sans TC', sans-serif; -webkit-tap-highlight-color: transparent; }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased min-h-screen flex items-center justify-center p-0 sm:p-4">
+
+<div id="app" class="max-w-md w-full min-h-screen sm:min-h-[840px] bg-white shadow-2xl flex flex-col justify-between relative overflow-hidden">
+
+  <!-- 頂部裝飾背景光暈 -->
+  <div class="absolute top-0 left-0 right-0 h-44 bg-gradient-to-br from-emerald-600 via-teal-600 to-emerald-800 -z-0 rounded-b-[2.5rem]"></div>
+
+  <div class="relative z-10 px-5 pt-7 pb-4">
+    <!-- 品牌 Logo 與標題 -->
+    <div class="flex items-center space-x-3 text-white mb-6">
+      <div class="w-12 h-12 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-2xl shadow-inner border border-white/30">
+        🏓
+      </div>
+      <div>
+        <h1 class="text-lg font-extrabold tracking-wide">宜蘭市體育會匹克球教學預約媒合平台</h1>
+        <p class="text-[11px] text-emerald-100 font-medium">Pickleball Booking & Match Hub</p>
+      </div>
+    </div>
+
+    <!-- 用戶 LINE 身分識別小卡 -->
+    <div class="bg-white/95 backdrop-blur-md rounded-2xl p-4 shadow-lg border border-slate-100 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-11 h-11 rounded-full border-2 border-emerald-500 overflow-hidden bg-slate-100 flex items-center justify-center font-bold text-slate-700">
+          <img v-if="userProfile.pictureUrl" :src="userProfile.pictureUrl" class="w-full h-full object-cover">
+          <span v-else class="text-base text-emerald-700">{{ userProfile.name.charAt(0) }}</span>
+        </div>
+        <div>
+          <div class="flex items-center space-x-1.5">
+            <span class="text-xs text-slate-400">登入身分：</span>
+            <span class="font-bold text-sm text-slate-800">{{ userProfile.name }}</span>
+          </div>
+          <p class="text-[10px] text-slate-400 font-mono mt-0.5">UID: {{ formatUid(userProfile.userId) }}</p>
+        </div>
+      </div>
+      <div class="text-right">
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold"
+              :class="isLiffReady ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'">
+          <span class="w-1.5 h-1.5 rounded-full mr-1" :class="isLiffReady ? 'bg-emerald-500' : 'bg-amber-500'"></span>
+          {{ isLiffReady ? 'LINE 連線' : '展示模式' }}
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 主選單：三大身分入口卡片 -->
+  <main class="relative z-10 px-5 flex-1 flex flex-col justify-center py-2 space-y-4">
+    <div class="text-center mb-1">
+      <p class="text-xs font-bold text-slate-400 tracking-wider uppercase">請選擇進入身分</p>
+    </div>
+
+    <!-- 入口 1：學員入口 -->
+    <div 
+      @click="navigateTo('student-liff.html')"
+      class="group p-4 bg-gradient-to-r from-emerald-50 to-white hover:from-emerald-100/70 border border-emerald-200 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer flex items-center justify-between"
+    >
+      <div class="flex items-center space-x-4">
+        <div class="w-13 h-13 w-12 h-12 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-2xl shadow-md shadow-emerald-600/30 group-hover:scale-105 transition">
+          🏸
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <h2 class="font-bold text-slate-900 text-base">我是學員</h2>
+            <span class="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full">免註冊</span>
+          </div>
+          <p class="text-xs text-slate-500 mt-1">提出上課需求・挑選教練空檔・預約查詢</p>
+        </div>
+      </div>
+      <div class="text-slate-300 group-hover:text-emerald-600 transition text-lg font-bold">
+        ➔
+      </div>
+    </div>
+
+    <!-- 入口 2：教練入口 -->
+    <div 
+      @click="navigateTo('coach-liff.html')"
+      class="group p-4 bg-gradient-to-r from-blue-50 to-white hover:from-blue-100/70 border border-blue-200 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer flex items-center justify-between"
+    >
+      <div class="flex items-center space-x-4">
+        <div class="w-12 h-12 rounded-xl bg-blue-600 text-white flex items-center justify-center text-2xl shadow-md shadow-blue-600/30 group-hover:scale-105 transition">
+          📋
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <h2 class="font-bold text-slate-900 text-base">我是教練</h2>
+            <span class="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full">審核認證制</span>
+          </div>
+          <p class="text-xs text-slate-500 mt-1">登記可授課空檔・學員需求認領・課表查詢</p>
+        </div>
+      </div>
+      <div class="text-slate-300 group-hover:text-blue-600 transition text-lg font-bold">
+        ➔
+      </div>
+    </div>
+
+    <!-- 入口 3：委員會入口 -->
+    <div 
+      @click="navigateTo('admin-liff.html')"
+      class="group p-4 bg-gradient-to-r from-slate-50 to-white hover:from-slate-100 border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer flex items-center justify-between"
+    >
+      <div class="flex items-center space-x-4">
+        <div class="w-12 h-12 rounded-xl bg-slate-800 text-white flex items-center justify-center text-2xl shadow-md shadow-slate-900/30 group-hover:scale-105 transition">
+          🛡️
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <h2 class="font-bold text-slate-900 text-base">委員會幹部</h2>
+            <span class="bg-slate-200 text-slate-800 text-[10px] font-bold px-2 py-0.5 rounded-full">管理後台</span>
+          </div>
+          <p class="text-xs text-slate-500 mt-1">雙向撮合排課・幹部與教練審核・收支記帳</p>
+        </div>
+      </div>
+      <div class="text-slate-300 group-hover:text-slate-800 transition text-lg font-bold">
+        ➔
+      </div>
+    </div>
+  </main>
+
+  <!-- 底部資訊列 -->
+  <footer class="p-5 text-center text-slate-400 text-xs border-t border-slate-100 space-y-1 bg-slate-50">
+    <p class="font-medium text-slate-600">宜蘭在地推薦球場：國民運動中心 / 運動公園風雨球場</p>
+    <p class="text-[11px] text-slate-400">宜蘭市體育會匹克球委員會 © 2026</p>
+  </footer>
+
+</div>
+
+<!-- Vue 3 & LIFF 邏輯腳本 -->
+<script>
+  const { createApp, reactive, ref, onMounted } = Vue;
+
+  // ⚠️ 未來在 LINE Developers 申請完成後將 LIFF ID 貼於此處
+  const UNIFIED_LIFF_ID = ""; 
+
+  createApp({
+    setup() {
+      const isLiffReady = ref(false);
+
+      // 預設身分資料（預載創世管理員 杜和益 資訊方便本機展示）
+      const userProfile = reactive({
+        userId: 'Ud857f472593d4263cdf8353f1e34ef88',
+        name: '杜和益',
+        pictureUrl: ''
+      });
+
+      function formatUid(uid) {
+        if (!uid) return '';
+        return uid.substring(0, 8) + '...' + uid.slice(-4);
+      }
+
+      // 初始化 LIFF
+      onMounted(async () => {
+        if (UNIFIED_LIFF_ID && typeof liff !== 'undefined') {
+          try {
+            await liff.init({ liffId: UNIFIED_LIFF_ID });
+            if (!liff.isLoggedIn()) {
+              liff.login();
+            } else {
+              const profile = await liff.getProfile();
+              userProfile.userId = profile.userId;
+              userProfile.name = profile.displayName;
+              userProfile.pictureUrl = profile.pictureUrl || '';
+              isLiffReady.value = true;
+
+              // 將使用者資訊存入 LocalStorage，讓子頁面免重複驗證直接讀取
+              localStorage.setItem('pickle_uid', profile.userId);
+              localStorage.setItem('pickle_name', profile.displayName);
+              localStorage.setItem('pickle_pic', profile.pictureUrl || '');
+            }
+          } catch (err) {
+            console.warn('LIFF 初始化失敗或處於非 LINE 環境，使用展示資料:', err);
+          }
+        } else {
+          // 本機瀏覽器預覽時儲存展示資料
+          localStorage.setItem('pickle_uid', userProfile.userId);
+          localStorage.setItem('pickle_name', userProfile.name);
+        }
+      });
+
+      // 點擊卡片跳轉至對應子頁面
+      function navigateTo(targetUrl) {
+        window.location.href = targetUrl;
+      }
+
+      return {
+        userProfile,
+        isLiffReady,
+        formatUid,
+        navigateTo
+      };
+    }
+  }).mount('#app');
+</script>
+
+</body>
+</html>
