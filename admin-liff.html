@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>匹克球預約管理後台 - 委員會端</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Vue 3 CDN -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <!-- LINE LIFF SDK -->
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <!-- Google Noto Sans TC 字型 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Noto Sans TC', sans-serif; -webkit-tap-highlight-color: transparent; }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased min-h-screen pb-24">
+
+<div id="app" class="max-w-md md:max-w-xl mx-auto min-h-screen bg-white shadow-xl flex flex-col relative">
+
+  <!-- 頂部：幹部狀態與首頁捷徑 -->
+  <header class="bg-slate-900 text-white px-4 py-3 sticky top-0 z-30 shadow-md">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center space-x-2.5">
+        <a href="index.html" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-sm font-bold border border-slate-700 transition" title="回首頁">
+          🏠
+        </a>
+        <div>
+          <div class="flex items-center space-x-1.5">
+            <span class="font-bold text-sm tracking-wide">{{ adminProfile.name }}</span>
+            <span :class="isAdminApproved ? 'bg-purple-600' : 'bg-amber-600'" class="text-[10px] px-1.5 py-0.5 rounded font-medium">
+              {{ isAdminApproved ? '委員會幹部' : '無權限' }}
+            </span>
+          </div>
+          <p class="text-[10px] text-slate-400 font-mono">UID: {{ formatUid(adminProfile.userId) }}</p>
+        </div>
+      </div>
+      <!-- 測試切換 -->
+      <button 
+        @click="isAdminApproved = !isAdminApproved" 
+        class="text-xs bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded text-slate-300 border border-slate-600 transition"
+      >
+        {{ isAdminApproved ? '模擬非幹部' : '恢復幹部權限' }}
+      </button>
+    </div>
+  </header>
+
+  <!-- 情況 A：非委員會管理員攔截門禁 -->
+  <main v-if="!isAdminApproved" class="flex-1 p-6 flex flex-col justify-center">
+    <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm text-center space-y-4">
+      <div class="w-14 h-14 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto text-2xl font-bold">
+        🚫
+      </div>
+      <div>
+        <h2 class="text-lg font-bold text-slate-900">非委員會人員無權訪問</h2>
+        <p class="text-xs text-slate-500 mt-1">此後台僅限宜蘭匹克球推廣委員會授權幹部調度使用。</p>
+      </div>
+
+      <div class="bg-slate-50 p-3 rounded-xl text-left text-xs space-y-2 border border-slate-100">
+        <div>
+          <span class="text-slate-400 block text-[10px]">您的 LINE UID：</span>
+          <p class="font-mono text-xs font-bold text-slate-700 break-all select-all">{{ adminProfile.userId }}</p>
+        </div>
+        <button 
+          @click="copyUid"
+          class="w-full py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-lg text-xs transition flex items-center justify-center space-x-1"
+        >
+          <span>📋 一鍵複製 UID 傳給杜和益</span>
+        </button>
+      </div>
+
+      <button 
+        @click="applyForAdmin" 
+        class="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-md transition"
+      >
+        線上申請加入委員會幹部
+      </button>
+
+      <a href="index.html" class="block text-xs text-slate-400 hover:text-slate-600 pt-1">
+        ← 返回身分選擇首頁
+      </a>
+    </div>
+  </main>
+
+  <!-- 情況 B：委員會管理後台 (已核准) -->
+  <main v-else class="flex-1 p-4 overflow-y-auto">
+
+    <!-- Tab 1: 撮合排課工作台 -->
+    <section v-if="currentTab === 'matching'" class="space-y-4">
+      <div class="border-b pb-3 flex justify-between items-end">
+        <div>
+          <h1 class="text-xl font-bold text-slate-900">需求撮合工作台</h1>
+          <p class="text-xs text-slate-500 mt-0.5">學員求課清單 ↔ 教練意向調度</p>
+        </div>
+        <span class="text-xs bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded-full">
+          待媒合: {{ pendingRequests.length }}
+        </span>
+      </div>
+
+      <div v-if="pendingRequests.length === 0" class="py-16 text-center text-slate-400 text-xs">
+        目前無待處理的媒合需求
+      </div>
+
+      <div v-else class="space-y-4">
+        <div 
+          v-for="req in pendingRequests" 
+          :key="req.reqId"
+          class="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3"
+        >
+          <div class="flex justify-between items-start">
+            <div>
+              <span class="font-mono text-xs font-bold text-blue-700">{{ req.reqId }}</span>
+              <h3 class="text-sm font-bold text-slate-900 mt-0.5">{{ req.studentName }} ({{ req.courseType }})</h3>
+            </div>
+            <span class="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
+              {{ req.designatedCoach ? '⭐ 指定：' + req.designatedCoach : '公開媒合' }}
+            </span>
+          </div>
+
+          <div class="text-xs text-slate-600 space-y-1 bg-white p-3 rounded-lg border border-slate-100">
+            <p>📅 上課時間：<strong>{{ req.preferredDate }} ({{ req.timeSlot }})</strong></p>
+            <p>🏸 人數程度：{{ req.studentCount }} 人 / 程度 {{ req.level }}</p>
+            <p>📍 期望地點：{{ req.venuePreference }}</p>
+            <p v-if="req.notes" class="text-slate-500">💬 備註：{{ req.notes }}</p>
+          </div>
+
+          <!-- 意向名單與教練指派 -->
+          <div class="space-y-1.5 pt-1">
+            <div class="flex justify-between items-center text-xs">
+              <label class="font-bold text-slate-700">指派授課教練：</label>
+              <span class="text-[11px] text-slate-400">登記意向：{{ req.interestedCoaches.join('、') || '無' }}</span>
+            </div>
+            <select 
+              v-model="req.assignedCoach" 
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-purple-500 focus:outline-none"
+            >
+              <option value="">-- 請選擇指派教練 --</option>
+              <option v-for="c in approvedCoaches" :key="c" :value="c">{{ c }}</option>
+            </select>
+          </div>
+
+          <!-- 正式場地分配 -->
+          <div class="space-y-1.5">
+            <label class="text-xs font-bold text-slate-700">確認上課球場：</label>
+            <select 
+              v-model="req.assignedVenue" 
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-purple-500 focus:outline-none"
+            >
+              <option value="宜蘭國民運動中心">宜蘭國民運動中心</option>
+              <option value="宜蘭運動公園風雨光電球場">宜蘭運動公園風雨光電球場</option>
+              <option value="教練自備/自理場地">教練自備/自理場地</option>
+            </select>
+          </div>
+
+          <!-- 衝堂檢核警示 -->
+          <div v-if="checkConflict(req.assignedCoach, req.preferredDate, req.timeSlot)" class="p-2 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 flex items-center space-x-1.5">
+            <span>⚠️</span>
+            <span><strong>衝堂警告：</strong> {{ req.assignedCoach }} 在該時段已有其他排定課程！</span>
+          </div>
+
+          <!-- 撮合確認按鈕 (衝堂防呆鎖定) -->
+          <button 
+            @click="confirmMatch(req)"
+            :disabled="!req.assignedCoach || checkConflict(req.assignedCoach, req.preferredDate, req.timeSlot)"
+            :class="(!req.assignedCoach || checkConflict(req.assignedCoach, req.preferredDate, req.timeSlot)) ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-purple-700 hover:bg-purple-800 text-white shadow-md'"
+            class="w-full py-2.5 rounded-lg text-xs font-bold transition"
+          >
+            確認媒合並排程 (產出 MAT-)
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 2: 長輩代客提單與訂單管理 -->
+    <section v-if="currentTab === 'proxy'" class="space-y-5">
+      <div class="border-b pb-3">
+        <h1 class="text-xl font-bold text-slate-900">長輩代客提單預約</h1>
+        <p class="text-xs text-slate-500 mt-0.5">針對不擅操作手機長輩，由委員會口頭接洽時代為登記</p>
+      </div>
+
+      <div class="bg-slate-50 p-4 border border-slate-200 rounded-xl space-y-3 text-xs">
+        <div class="space-y-1">
+          <label class="font-bold text-slate-700">學員稱呼 / 姓名 <span class="text-red-500">*</span></label>
+          <input type="text" v-model="proxyForm.studentName" placeholder="例如：李大哥 (電話聯絡)" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none">
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div class="space-y-1">
+            <label class="font-bold text-slate-700">課程班型</label>
+            <select v-model="proxyForm.courseType" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
+              <option value="初階團體培訓班">初階團體班 (5堂 $1500)</option>
+              <option value="進階精緻單堂課">進階單堂課 ($1400-$1500)</option>
+            </select>
+          </div>
+          <div class="space-y-1">
+            <label class="font-bold text-slate-700">人數</label>
+            <input type="number" v-model="proxyForm.studentCount" min="1" max="6" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div class="space-y-1">
+            <label class="font-bold text-slate-700">上課日期</label>
+            <input type="date" v-model="proxyForm.date" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
+          </div>
+          <div class="space-y-1">
+            <label class="font-bold text-slate-700">時段區間</label>
+            <select v-model="proxyForm.timeSlot" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
+              <option value="上午 (09:00-12:00)">上午 (09:00-12:00)</option>
+              <option value="下午 (14:00-17:00)">下午 (14:00-17:00)</option>
+              <option value="晚上 (18:00-21:00)">晚上 (18:00-21:00)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="space-y-1">
+          <label class="font-bold text-slate-700">指定教練 (選填)</label>
+          <select v-model="proxyForm.designatedCoach" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
+            <option value="">不指定 (由委員會調度)</option>
+            <option v-for="c in approvedCoaches" :key="c" :value="c">{{ c }}</option>
+          </select>
+        </div>
+
+        <button 
+          @click="submitProxyBooking" 
+          class="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition"
+        >
+          建立代客預約需求 (寫入 REQ-)
+        </button>
+      </div>
+
+      <!-- 進行中正式排程總覽與強制取消 -->
+      <div class="space-y-3 pt-2">
+        <h2 class="text-sm font-bold text-slate-800">已排程課程總覽 ({{ activeMatches.length }})</h2>
+        <div v-for="m in activeMatches" :key="m.matId" class="p-3 bg-white border border-slate-200 rounded-xl space-y-2 text-xs">
+          <div class="flex justify-between items-center">
+            <span class="font-mono font-bold text-purple-700">{{ m.matId }}</span>
+            <span class="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full text-[10px]">
+              {{ m.status === 'Confirmed' ? '排定中' : '已完課' }}
+            </span>
+          </div>
+          <p class="font-bold text-slate-900">{{ m.studentName }} ↔ {{ m.coachNames }}</p>
+          <p class="text-slate-500">📅 {{ m.lessonDate }} ({{ m.lessonTime }}) 📍 {{ m.venue }}</p>
+          
+          <div class="pt-1 flex space-x-2">
+            <button 
+              @click="markCompleted(m)"
+              class="flex-1 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded font-semibold border border-emerald-200"
+            >
+              標註完課 (進入記帳)
+            </button>
+            <button 
+              @click="forceCancel(m)"
+              class="py-1.5 px-3 bg-red-50 text-red-600 hover:bg-red-100 rounded font-semibold border border-red-200"
+            >
+              代客取消
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 3: 白名單審核中心 -->
+    <section v-if="currentTab === 'whitelist'" class="space-y-5">
+      <div class="border-b pb-3">
+        <h1 class="text-xl font-bold text-slate-900">白名單與權限審核</h1>
+        <p class="text-xs text-slate-500 mt-0.5">免手打 UID 一鍵審核教練與幹部資格</p>
+      </div>
+
+      <!-- 待審核教練申請 -->
+      <div class="space-y-3">
+        <h2 class="text-sm font-bold text-slate-800 flex items-center justify-between">
+          <span>待審核教練 ({{ pendingCoaches.length }})</span>
+        </h2>
+        <div v-if="pendingCoaches.length === 0" class="py-4 text-center text-slate-400 text-xs bg-slate-50 rounded-xl">
+          目前無待審核教練
+        </div>
+        <div v-for="c in pendingCoaches" :key="c.uid" class="p-3 bg-white border border-slate-200 rounded-xl space-y-2 text-xs">
+          <div class="flex justify-between items-start">
+            <div>
+              <strong class="text-slate-900 text-sm">{{ c.displayName }}</strong>
+              <p class="text-[10px] text-slate-400 font-mono">UID: {{ formatUid(c.uid) }}</p>
+            </div>
+            <span class="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full">審核中</span>
+          </div>
+          <div class="bg-slate-50 p-2 rounded text-[11px] text-slate-600 space-y-0.5">
+            <p>真實姓名：<input v-model="c.realName" placeholder="後台補登" class="bg-white border rounded px-1.5 py-0.5 text-[11px]"></p>
+            <p>DUPR 評分：<input v-model="c.dupr" placeholder="後台補登" class="bg-white border rounded px-1.5 py-0.5 text-[11px]"></p>
+          </div>
+          <div class="flex space-x-2 pt-1">
+            <button @click="approveCoach(c)" class="flex-1 py-1.5 bg-blue-600 text-white font-bold rounded text-xs hover:bg-blue-700">
+              核准成為教練
+            </button>
+            <button @click="rejectCoach(c)" class="py-1.5 px-3 bg-slate-100 text-slate-600 rounded text-xs hover:bg-slate-200">
+              婉拒
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 待審核幹部申請 -->
+      <div class="space-y-3 pt-3 border-t border-slate-200">
+        <h2 class="text-sm font-bold text-slate-800 flex items-center justify-between">
+          <span>待審核委員會幹部 ({{ pendingAdmins.length }})</span>
+        </h2>
+        <div v-if="pendingAdmins.length === 0" class="py-4 text-center text-slate-400 text-xs bg-slate-50 rounded-xl">
+          目前無新幹部申請
+        </div>
+        <div v-for="a in pendingAdmins" :key="a.uid" class="p-3 bg-white border border-slate-200 rounded-xl space-y-2 text-xs">
+          <div class="flex justify-between items-center">
+            <div>
+              <strong class="text-slate-900">{{ a.displayName }}</strong>
+              <p class="text-[10px] text-slate-400 font-mono">UID: {{ formatUid(a.uid) }}</p>
+            </div>
+            <button @click="approveAdmin(a)" class="py-1 px-3 bg-purple-700 text-white font-bold rounded text-xs hover:bg-purple-800">
+              授權為幹部
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 4: 結課均分記帳工作台 -->
+    <section v-if="currentTab === 'accounting'" class="space-y-4">
+      <div class="border-b pb-3">
+        <h1 class="text-xl font-bold text-slate-900">課堂均分記帳模組</h1>
+        <p class="text-xs text-slate-500 mt-0.5">完課後一鍵核算實收學費、扣除場地費與均分教練薪資</p>
+      </div>
+
+      <!-- 記帳試算卡片 -->
+      <div class="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 text-xs">
+        <h2 class="font-bold text-slate-900 text-sm">課堂收支試算</h2>
+        <div class="grid grid-cols-2 gap-2">
+          <div class="space-y-1">
+            <label class="font-bold text-slate-700">實收學費總額 (NT$)</label>
+            <input type="number" v-model.number="calcForm.revenue" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
+          </div>
+          <div class="space-y-1">
+            <label class="font-bold text-slate-700">實付場地費 (NT$)</label>
+            <input type="number" v-model.number="calcForm.venueCost" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
+          </div>
+        </div>
+
+        <div class="space-y-1">
+          <label class="font-bold text-slate-700">出勤教練人數</label>
+          <div class="flex space-x-2">
+            <button 
+              v-for="num in [1, 2, 3]" 
+              :key="num"
+              type="button"
+              @click="calcForm.coachCount = num"
+              :class="calcForm.coachCount === num ? 'bg-purple-700 text-white font-bold' : 'bg-white text-slate-700 border'"
+              class="flex-1 py-1.5 rounded-lg text-xs"
+            >
+              {{ num }} 位教練
+            </button>
+          </div>
+        </div>
+
+        <!-- 即時計算結果 -->
+        <div class="bg-white p-3 rounded-lg border border-purple-200 space-y-1 text-xs">
+          <div class="flex justify-between">
+            <span class="text-slate-500">教練分配總酬勞：</span>
+            <strong class="text-slate-900">NT$ {{ (calcForm.revenue - calcForm.venueCost).toLocaleString() }}</strong>
+          </div>
+          <div class="flex justify-between text-purple-700 font-bold text-sm pt-1 border-t border-slate-100">
+            <span>每位教練實得：</span>
+            <span>NT$ {{ perCoachPay.toLocaleString() }}</span>
+          </div>
+        </div>
+
+        <button 
+          @click="generateAccountingSlip" 
+          class="w-full py-2.5 bg-purple-700 hover:bg-purple-800 text-white font-bold rounded-lg text-xs transition"
+        >
+          確認核銷並生成記帳單 (ACC-)
+        </button>
+      </div>
+
+      <!-- 記帳流水紀錄 -->
+      <div class="space-y-2 pt-2">
+        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider">最近核銷紀錄</h3>
+        <div v-for="acc in accountingLogs" :key="acc.accId" class="p-3 bg-white border border-slate-200 rounded-xl space-y-1 text-xs">
+          <div class="flex justify-between items-center">
+            <span class="font-mono font-bold text-purple-700">{{ acc.accId }}</span>
+            <span class="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full">已結清</span>
+          </div>
+          <p class="text-slate-800">收入 ${{ acc.revenue }} - 場地 ${{ acc.venueCost }} = 酬勞 ${{ acc.pool }}</p>
+          <p class="text-slate-500 text-[11px]">執教：{{ acc.coachNames }} (每人 ${{ acc.perPay }})</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 底部導航欄 (Tab Bar) -->
+  <nav v-if="isAdminApproved" class="bg-white border-t border-slate-200 fixed bottom-0 left-0 right-0 max-w-md md:max-w-xl mx-auto z-30 flex">
+    <button 
+      @click="currentTab = 'matching'" 
+      :class="currentTab === 'matching' ? 'text-purple-700 font-bold' : 'text-slate-400 hover:text-slate-600'"
+      class="flex-1 py-2.5 flex flex-col items-center justify-center text-xs transition relative"
+    >
+      <span class="text-lg">🔀</span>
+      <span class="text-[10px] mt-0.5">撮合排課</span>
+      <span v-if="pendingRequests.length > 0" class="absolute top-1.5 right-4 w-4 h-4 bg-purple-600 text-white rounded-full text-[9px] flex items-center justify-center font-bold">
+        {{ pendingRequests.length }}
+      </span>
+    </button>
+    <button 
+      @click="currentTab = 'proxy'" 
+      :class="currentTab === 'proxy' ? 'text-purple-700 font-bold' : 'text-slate-400 hover:text-slate-600'"
+      class="flex-1 py-2.5 flex flex-col items-center justify-center text-xs transition"
+    >
+      <span class="text-lg">📝</span>
+      <span class="text-[10px] mt-0.5">代客/管理</span>
+    </button>
+    <button 
+      @click="currentTab = 'whitelist'" 
+      :class="currentTab === 'whitelist' ? 'text-purple-700 font-bold' : 'text-slate-400 hover:text-slate-600'"
+      class="flex-1 py-2.5 flex flex-col items-center justify-center text-xs transition relative"
+    >
+      <span class="text-lg">🛡️</span>
+      <span class="text-[10px] mt-0.5">白名單審核</span>
+      <span v-if="pendingCoaches.length > 0" class="absolute top-1.5 right-4 w-4 h-4 bg-red-500 text-white rounded-full text-[9px] flex items-center justify-center font-bold">
+        {{ pendingCoaches.length }}
+      </span>
+    </button>
+    <button 
+      @click="currentTab = 'accounting'" 
+      :class="currentTab === 'accounting' ? 'text-purple-700 font-bold' : 'text-slate-400 hover:text-slate-600'"
+      class="flex-1 py-2.5 flex flex-col items-center justify-center text-xs transition"
+    >
+      <span class="text-lg">💰</span>
+      <span class="text-[10px] mt-0.5">均分記帳</span>
+    </button>
+  </nav>
+
+</div>
+
+<script>
+  const { createApp, ref, reactive, computed, onMounted } = Vue;
+
+  // ⚠️ 未來向 LINE Developers 申請 LIFF ID 後填入
+  const ADMIN_LIFF_ID = "";
+
+  createApp({
+    setup() {
+      // 1. 創世管理員資訊
+      const adminProfile = reactive({
+        userId: 'Ud857f472593d4263cdf8353f1e34ef88',
+        name: '杜和益 (創世幹部)'
+      });
+
+      const isAdminApproved = ref(true); // 預設已核准
+      const currentTab = ref('matching');
+
+      // 合格教練清單
+      const approvedCoaches = ref(['杜和益 教練', '王教練', '李教練']);
+
+      // 2. 待撮合學員需求 (Mock Data)
+      const pendingRequests = ref([
+        {
+          reqId: 'REQ-20260910-001',
+          studentName: '陳大文',
+          courseType: '進階單堂精緻班',
+          studentCount: 2,
+          level: '2.5',
+          preferredDate: '2026-09-15',
+          timeSlot: '上午 (09:00-12:00)',
+          venuePreference: '宜蘭國民運動中心',
+          designatedCoach: '杜和益 教練',
+          notes: '加強反手抽球',
+          interestedCoaches: ['杜和益 教練'],
+          assignedCoach: '杜和益 教練',
+          assignedVenue: '宜蘭國民運動中心'
+        },
+        {
+          reqId: 'REQ-20260910-002',
+          studentName: '林小姐等4人',
+          courseType: '初階團體培訓班',
+          studentCount: 4,
+          level: '1.0-2.0',
+          preferredDate: '2026-09-18',
+          timeSlot: '晚上 (18:00-21:00)',
+          venuePreference: '宜蘭運動公園風雨光電球場',
+          designatedCoach: '',
+          notes: '純新手',
+          interestedCoaches: ['王教練'],
+          assignedCoach: '王教練',
+          assignedVenue: '宜蘭運動公園風雨光電球場'
+        }
+      ]);
+
+      // 3. 已排程正式訂單 (Mock Data)
+      const activeMatches = ref([
+        {
+          matId: 'MAT-20260910-001',
+          studentName: '張先生',
+          coachNames: '杜和益 教練',
+          lessonDate: '2026-09-15',
+          lessonTime: '上午 (09:00-12:00)',
+          venue: '宜蘭國民運動中心',
+          status: 'Confirmed'
+        }
+      ]);
+
+      // 4. 白名單待審核清單 (Mock Data)
+      const pendingCoaches = ref([
+        { uid: 'U998877665544', displayName: '張大榮', realName: '', dupr: '3.65' }
+      ]);
+      const pendingAdmins = ref([
+        { uid: 'U112233445566', displayName: '陳幹事' }
+      ]);
+
+      // 5. 代客提單表單模型
+      const proxyForm = reactive({
+        studentName: '',
+        courseType: '初階團體培訓班',
+        studentCount: 4,
+        date: getTomorrowDate(),
+        timeSlot: '上午 (09:00-12:00)',
+        designatedCoach: ''
+      });
+
+      // 6. 均分記帳表單模型
+      const calcForm = reactive({
+        revenue: 2800,
+        venueCost: 600,
+        coachCount: 2
+      });
+
+      const perCoachPay = computed(() => {
+        const net = calcForm.revenue - calcForm.venueCost;
+        return calcForm.coachCount > 0 ? Math.round(net / calcForm.coachCount) : 0;
+      });
+
+      const accountingLogs = ref([
+        {
+          accId: 'ACC-20260909-001',
+          revenue: 3000,
+          venueCost: 600,
+          pool: 2400,
+          coachNames: '杜和益、王教練',
+          perPay: 1200
+        }
+      ]);
+
+      function formatUid(uid) {
+        return uid ? uid.substring(0, 8) + '...' + uid.slice(-4) : '';
+      }
+
+      function getTomorrowDate() {
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        return d.toISOString().split('T')[0];
+      }
+
+      // 衝堂檢核防呆
+      function checkConflict(coachName, date, timeSlot) {
+        if (!coachName) return false;
+        return activeMatches.value.some(m => 
+          m.coachNames.includes(coachName) && 
+          m.lessonDate === date && 
+          m.lessonTime === timeSlot &&
+          m.status === 'Confirmed'
+        );
+      }
+
+      // 確認撮合
+      function confirmMatch(req) {
+        const newMatId = `MAT-20260910-${Math.floor(100 + Math.random() * 900)}`;
+        activeMatches.value.unshift({
+          matId: newMatId,
+          studentName: req.studentName,
+          coachNames: req.assignedCoach,
+          lessonDate: req.preferredDate,
+          lessonTime: req.timeSlot,
+          venue: req.assignedVenue,
+          status: 'Confirmed'
+        });
+        // 自待處理池中移除
+        pendingRequests.value = pendingRequests.value.filter(r => r.reqId !== req.reqId);
+        alert(`撮合排程成功！生成訂單單號：${newMatId}`);
+      }
+
+      // 建立代客預約
+      function submitProxyBooking() {
+        if (!proxyForm.studentName) {
+          alert('請輸入學員稱呼！');
+          return;
+        }
+        const newReqId = `REQ-20260910-${Math.floor(100 + Math.random() * 900)}`;
+        pendingRequests.value.unshift({
+          reqId: newReqId,
+          studentName: proxyForm.studentName + ' (幹部代約)',
+          courseType: proxyForm.courseType,
+          studentCount: proxyForm.studentCount,
+          level: '待評估',
+          preferredDate: proxyForm.date,
+          timeSlot: proxyForm.timeSlot,
+          venuePreference: '由委員會協調',
+          designatedCoach: proxyForm.designatedCoach,
+          notes: '委員會口頭受託登記',
+          interestedCoaches: [],
+          assignedCoach: proxyForm.designatedCoach || '',
+          assignedVenue: '宜蘭國民運動中心'
+        });
+        alert(`已建立代客需求單號：${newReqId}，已匯入撮合池！`);
+        proxyForm.studentName = '';
+        currentTab.value = 'matching';
+      }
+
+      // 標註完課
+      function markCompleted(match) {
+        match.status = 'Completed';
+        alert(`單號 ${match.matId} 已完課，請至「均分記帳」分頁清算收支！`);
+      }
+
+      // 代客取消
+      function forceCancel(match) {
+        const reason = prompt('請輸入強制取消原因（如：宜蘭強降雨球場濕滑、學員突發事故）：');
+        if (reason) {
+          match.status = 'Cancelled_Admin';
+          activeMatches.value = activeMatches.value.filter(m => m.matId !== match.matId);
+          alert(`單號 ${match.matId} 已代客取消並釋出場地！原因：${reason}`);
+        }
+      }
+
+      // 核准教練
+      function approveCoach(coach) {
+        approvedCoaches.value.push(coach.displayName);
+        pendingCoaches.value = pendingCoaches.value.filter(c => c.uid !== coach.uid);
+        alert(`已核准 ${coach.displayName} 成為正式授課教練！`);
+      }
+
+      function rejectCoach(coach) {
+        pendingCoaches.value = pendingCoaches.value.filter(c => c.uid !== coach.uid);
+      }
+
+      // 授權幹部
+      function approveAdmin(admin) {
+        pendingAdmins.value = pendingAdmins.value.filter(a => a.uid !== admin.uid);
+        alert(`已核准 ${admin.displayName} 成為委員會幹部！`);
+      }
+
+      // 生成記帳單
+      function generateAccountingSlip() {
+        const newAccId = `ACC-20260910-${Math.floor(100 + Math.random() * 900)}`;
+        accountingLogs.value.unshift({
+          accId: newAccId,
+          revenue: calcForm.revenue,
+          venueCost: calcForm.venueCost,
+          pool: calcForm.revenue - calcForm.venueCost,
+          coachNames: '當日執教教練',
+          perPay: perCoachPay.value
+        });
+        alert(`記帳成功！傳票單號：${newAccId}`);
+      }
+
+      function copyUid() {
+        navigator.clipboard.writeText(adminProfile.userId).then(() => {
+          alert('UID 已複製到剪貼簿！');
+        });
+      }
+
+      function applyForAdmin() {
+        alert('申請已提交！請請創世管理員杜和益於後台核准。');
+        isAdminApproved.value = true;
+      }
+
+      onMounted(async () => {
+        const savedUid = localStorage.getItem('pickle_uid');
+        const savedName = localStorage.getItem('pickle_name');
+        if (savedUid) adminProfile.userId = savedUid;
+        if (savedName) adminProfile.name = savedName;
+
+        if (ADMIN_LIFF_ID && typeof liff !== 'undefined') {
+          try {
+            await liff.init({ liffId: ADMIN_LIFF_ID });
+            if (liff.isLoggedIn()) {
+              const profile = await liff.getProfile();
+              adminProfile.userId = profile.userId;
+              adminProfile.name = profile.displayName;
+            }
+          } catch (e) {
+            console.warn('委員會 LIFF 初始化失敗:', e);
+          }
+        }
+      });
+
+      return {
+        adminProfile,
+        isAdminApproved,
+        currentTab,
+        approvedCoaches,
+        pendingRequests,
+        activeMatches,
+        pendingCoaches,
+        pendingAdmins,
+        proxyForm,
+        calcForm,
+        perCoachPay,
+        accountingLogs,
+        formatUid,
+        checkConflict,
+        confirmMatch,
+        submitProxyBooking,
+        markCompleted,
+        forceCancel,
+        approveCoach,
+        rejectCoach,
+        approveAdmin,
+        generateAccountingSlip,
+        copyUid,
+        applyForAdmin
+      };
+    }
+  }).mount('#app');
+</script>
+
+</body>
+</html>
