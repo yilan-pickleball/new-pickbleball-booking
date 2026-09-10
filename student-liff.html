@@ -6,8 +6,10 @@
   <title>匹克球課程預約 - 學員端</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Vue 3 CDN (用於響應式互動與狀態管理) -->
+  <!-- Vue 3 CDN -->
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <!-- LINE LIFF SDK (已補上) -->
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <!-- Google Fonts: Inter & Noto Sans TC -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -22,7 +24,7 @@
 
 <div id="app" class="max-w-md mx-auto min-h-screen bg-white shadow-xl flex flex-col relative">
 
-  <!-- 頂部：LINE 身分模擬狀態列 -->
+  <!-- 頂部：LINE 身分狀態列 -->
   <header class="bg-emerald-700 text-white px-4 py-3 sticky top-0 z-30 shadow-md">
     <div class="flex items-center justify-between">
       <div class="flex items-center space-x-3">
@@ -37,8 +39,8 @@
           <p class="text-[11px] text-emerald-100 font-mono">UID: {{ formatUid(userProfile.userId) }}</p>
         </div>
       </div>
-      <button @click="resetMockData" class="text-xs bg-emerald-800/80 hover:bg-emerald-900 px-2.5 py-1.5 rounded-lg text-emerald-100 border border-emerald-600 transition">
-        重置展示資料
+      <button @click="loadStudentData" class="text-xs bg-emerald-800/80 hover:bg-emerald-900 px-2.5 py-1.5 rounded-lg text-emerald-100 border border-emerald-600 transition flex items-center space-x-1">
+        <span>🔄 重新整理</span>
       </button>
     </div>
   </header>
@@ -59,7 +61,7 @@
         <p class="text-xs text-slate-500 mt-0.5">送出後委員會將在試算表後台為您配對教練與場地</p>
       </div>
 
-      <!-- 課程班型選擇器 (含現場現金費用說明) -->
+      <!-- 課程班型選擇器 -->
       <div class="space-y-2">
         <label class="text-sm font-bold text-slate-700">選擇課程班型 <span class="text-red-500">*</span></label>
         <div class="grid grid-cols-1 gap-3">
@@ -198,7 +200,7 @@
             class="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
           >
             <option value="不指定(由委員會推薦)">不指定 (由委員會為您推薦合適教練)</option>
-            <option value="杜和益 教練">杜和益 教練 </option>
+            <option value="杜和益 教練">杜和益 教練</option>
             <option value="王教練">王教練 (進階單打)</option>
             <option value="李教練">李教練 (雙打截擊戰術)</option>
           </select>
@@ -233,7 +235,7 @@
         </div>
       </div>
 
-      <!-- 送出按鈕 (含防呆鎖定) -->
+      <!-- 送出按鈕 -->
       <button 
         @click="submitRequest" 
         :disabled="activeBookingsCount >= 2 || isSubmitting"
@@ -252,7 +254,11 @@
         <p class="text-xs text-slate-500 mt-0.5">直接挑選合適時段，確認後委員會將直接鎖定排課</p>
       </div>
 
-      <div class="space-y-3">
+      <div v-if="availableSlots.length === 0" class="py-12 text-center text-slate-400 text-xs">
+        目前尚無教練開放中的時段
+      </div>
+
+      <div v-else class="space-y-3">
         <div 
           v-for="slot in availableSlots" 
           :key="slot.slotId"
@@ -281,11 +287,12 @@
 
           <button 
             @click="bookSlot(slot)"
-            :disabled="activeBookingsCount >= 2"
+            :disabled="activeBookingsCount >= 2 || isSubmitting"
             :class="activeBookingsCount >= 2 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-slate-900 hover:bg-slate-800 text-white'"
-            class="w-full mt-3 py-2.5 rounded-lg text-xs font-bold transition"
+            class="w-full mt-3 py-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1"
           >
-            {{ activeBookingsCount >= 2 ? '已達預約上限' : '我要預約此空檔' }}
+            <span v-if="isSubmitting" class="animate-spin mr-1">🔄</span>
+            <span>{{ activeBookingsCount >= 2 ? '已達預約上限' : '我要預約此空檔' }}</span>
           </button>
         </div>
       </div>
@@ -324,7 +331,7 @@
             <p>📅 時間：{{ b.date }} ({{ b.timeSlot }})</p>
             <p>🏸 教練：{{ b.coach || '待委員會配對推薦' }}</p>
             <p>📍 場地：{{ b.venue }}</p>
-            <p class="text-emerald-700 font-semibold">💵 現金應繳：NT$ {{ b.fee.toLocaleString() }} (現場支付)</p>
+            <p class="text-emerald-700 font-semibold">💵 現金應繳：NT$ {{ Number(b.fee || 1500).toLocaleString() }} (現場支付)</p>
           </div>
 
           <!-- 動作列 -->
@@ -340,7 +347,7 @@
             </button>
 
             <!-- 24 小時自主取消機制 -->
-            <template v-if="b.status === 'Pending' || b.status === 'Confirmed'">
+            <template v-if="b.status === 'Pending' || b.status === 'Interested' || b.status === 'Confirmed'">
               <!-- >= 24h 可取消 -->
               <button 
                 v-if="canCancelSelf(b.date)"
@@ -397,7 +404,7 @@
 
   <!-- 成功彈窗 Modal -->
   <div v-if="successModal.show" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl text-center space-y-4 animate-bounce-short">
+    <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl text-center space-y-4">
       <div class="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto text-2xl font-bold">
         ✓
       </div>
@@ -421,7 +428,7 @@
           @click="simulateCloseWindow"
           class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs rounded-xl transition"
         >
-          模擬 liff.closeWindow() 關閉
+          關閉視窗 (返回 LINE)
         </button>
       </div>
     </div>
@@ -429,19 +436,23 @@
 
 </div>
 
-<!-- Vue 3 核心互動邏輯與 Mock Data -->
+<!-- Vue 3 核心互動與 GAS 連動邏輯 -->
 <script>
   const { createApp, ref, computed, reactive, onMounted } = Vue;
 
+  // 專屬 Google Apps Script API 部署網址
+  const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwe_Xh7I8iOMDBK278mvBIIeXaVa9B3qz8bl2RfdEFT0elPW9Ff7Vg3p2sHm3COUdfkmA/exec";
+  const MY_LIFF_ID = "2011535009-IsC8f5XW"; 
+
   createApp({
     setup() {
-      // 1. LINE 身分模擬
+      // 1. LINE 身分識別
       const userProfile = reactive({
         userId: 'Ud857f472593d4263cdf8353f1e34ef88',
-        name: '杜和益 (學員端模擬)'
+        name: '杜和益 (學員)'
       });
 
-      const currentTab = ref('request'); // 'request' | 'slots' | 'myBookings'
+      const currentTab = ref('request');
       const isSubmitting = ref(false);
 
       // 宜蘭在地預設兩大球場
@@ -468,7 +479,7 @@
 
       // 表單資料模型
       const form = reactive({
-        courseType: 'basic', // 'basic' (初階5堂) | 'advanced' (進階單堂)
+        courseType: 'basic',
         studentCount: 4,
         preferredDate: getTomorrowDate(),
         timeSlot: '上午 (09:00-12:00)',
@@ -478,51 +489,13 @@
         notes: ''
       });
 
-      // 2. Mock Data：已開放空檔
-      const availableSlots = ref([
-        {
-          slotId: 'SLOT-20260912-001',
-          coachName: '杜和益 教練',
-          date: '2026-09-12',
-          timeSlot: '上午 (09:00-11:00)',
-          venue: '宜蘭國民運動中心'
-        },
-        {
-          slotId: 'SLOT-20260913-002',
-          coachName: '王教練',
-          date: '2026-09-13',
-          timeSlot: '晚上 (18:30-20:30)',
-          venue: '宜蘭運動公園風雨光電球場'
-        }
-      ]);
+      // 2. 即時從試算表載入的資料池
+      const availableSlots = ref([]);
+      const myBookings = ref([]);
 
-      // 3. Mock Data：我的預約紀錄
-      const myBookings = ref([
-        {
-          id: 'MAT-20260910-001',
-          courseTitle: '進階單堂精緻班 (2人)',
-          date: '2026-09-15',
-          timeSlot: '上午 (09:00-10:00)',
-          coach: '杜和益 教練',
-          venue: '宜蘭國民運動中心',
-          fee: 1400,
-          status: 'Confirmed'
-        },
-        {
-          id: 'REQ-20260908-003',
-          courseTitle: '初階團體培訓班 (4人成班)',
-          date: '2026-09-20',
-          timeSlot: '下午 (14:00-15:00)',
-          coach: null,
-          venue: '宜蘭運動公園風雨光電球場',
-          fee: 1500,
-          status: 'Pending'
-        }
-      ]);
-
-      // 計算進行中的預約筆數 (Pending 或 Confirmed)
+      // 計算進行中的預約筆數 (Pending / Interested / Confirmed)
       const activeBookingsCount = computed(() => {
-        return myBookings.value.filter(b => b.status === 'Pending' || b.status === 'Confirmed').length;
+        return myBookings.value.filter(b => b.status === 'Pending' || b.status === 'Interested' || b.status === 'Confirmed').length;
       });
 
       // 彈窗狀態
@@ -535,15 +508,84 @@
         fee: 0
       });
 
+      // 初始化載入
+      onMounted(async () => {
+        // LIFF 初始化
+        if (MY_LIFF_ID && typeof liff !== 'undefined') {
+          try {
+            await liff.init({ liffId: MY_LIFF_ID });
+            if (!liff.isLoggedIn()) {
+              liff.login();
+              return;
+            }
+            const profile = await liff.getProfile();
+            userProfile.userId = profile.userId;
+            userProfile.name = profile.displayName;
+          } catch (err) {
+            console.warn('LIFF 載入失敗，採用預設展示身分:', err);
+          }
+        }
+
+        // 從 Google 試算表載入最新資料
+        await loadStudentData();
+      });
+
+      // 從 Google Apps Script 取得最新空檔與個人預約
+      async function loadStudentData() {
+        try {
+          const res = await fetch(`${GAS_API_URL}?action=getStudentData&uid=${userProfile.userId}`);
+          const data = await res.json();
+          if (data.status === 'success') {
+            // 更新空檔池
+            availableSlots.value = (data.openSlots || []).map(s => ({
+              slotId: s.slotId,
+              coachName: s.coachName,
+              date: s.slotDate,
+              timeSlot: s.timeSlot,
+              venue: s.venueOption
+            }));
+
+            // 更新個人預約紀錄 (整合 Matches 與 Requests)
+            const combined = [];
+            (data.myMatches || []).forEach(m => {
+              combined.push({
+                id: m.matId,
+                courseTitle: m.courseType,
+                date: m.lessonDate,
+                timeSlot: m.lessonTime,
+                coach: m.coachNames,
+                venue: m.venue,
+                fee: m.expectedFee,
+                status: m.status
+              });
+            });
+            (data.myRequests || []).forEach(r => {
+              combined.push({
+                id: r.reqId,
+                courseTitle: r.courseType,
+                date: r.preferredDate,
+                timeSlot: r.timeSlot,
+                coach: r.designatedCoach,
+                venue: r.venuePreference,
+                fee: r.courseType.includes('初階') ? 1500 : (r.studentCount <= 2 ? 1400 : 1500),
+                status: r.status
+              });
+            });
+            myBookings.value = combined;
+          }
+        } catch (err) {
+          console.error('資料同步失敗:', err);
+        }
+      }
+
       // 計算費用
       function calculateFee() {
         if (form.courseType === 'basic') return 1500;
         return form.studentCount <= 2 ? 1400 : 1500;
       }
 
-      // 格式化 UID
       function formatUid(uid) {
-        return uid ? uid.substring(0, 10) + '...' : '';
+        return uid ? uid.substring(0, 8) + '...' + uid.slice(-4) : '';
       }
 
       function getTomorrowDate() {
@@ -554,126 +596,171 @@
 
       const minDate = computed(() => getTomorrowDate());
 
-      // 送出預約
-      function submitRequest() {
+      // 送出預約 (真實寫入 Google 試算表)
+      async function submitRequest() {
         if (activeBookingsCount.value >= 2) {
           alert('您已有 2 筆進行中預約，已達上限！');
           return;
         }
 
         isSubmitting.value = true;
-        setTimeout(() => {
-          const newReqId = `REQ-20260910-${Math.floor(100 + Math.random() * 900)}`;
-          const fee = calculateFee();
-          const title = form.courseType === 'basic' 
-            ? `初階團體培訓班 (${form.studentCount}人)` 
-            : `進階精緻單堂課 (${form.studentCount}人)`;
+        const fee = calculateFee();
+        const courseTitle = form.courseType === 'basic' 
+          ? `初階團體培訓班 (${form.studentCount}人)` 
+          : `進階精緻單堂課 (${form.studentCount}人)`;
 
-          // 寫入我的預約清單 (模擬寫入試算表)
-          myBookings.value.unshift({
-            id: newReqId,
-            courseTitle: title,
-            date: form.preferredDate,
-            timeSlot: form.timeSlot,
-            coach: form.designatedCoach.includes('不指定') ? null : form.designatedCoach,
-            venue: form.venuePreference,
-            fee: fee,
-            status: 'Pending'
+        const payload = {
+          action: 'submitStudentRequest',
+          studentUid: userProfile.userId,
+          studentName: userProfile.name,
+          courseType: courseTitle,
+          preferredDate: form.preferredDate,
+          timeSlot: form.timeSlot,
+          level: form.level,
+          studentCount: form.studentCount,
+          designatedCoach: form.designatedCoach,
+          venuePreference: form.venuePreference,
+          notes: form.notes
+        };
+
+        try {
+          const response = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
           });
+          const result = await response.json();
 
-          // 彈出成功 Modal
-          successModal.reqId = newReqId;
-          successModal.courseTitle = title;
-          successModal.date = form.preferredDate;
-          successModal.timeSlot = form.timeSlot;
-          successModal.fee = fee;
-          successModal.show = true;
+          if (result.status === 'success') {
+            successModal.reqId = result.reqId;
+            successModal.courseTitle = courseTitle;
+            successModal.date = form.preferredDate;
+            successModal.timeSlot = form.timeSlot;
+            successModal.fee = fee;
+            successModal.show = true;
 
+            await loadStudentData();
+          } else {
+            alert('提單失敗：' + result.message);
+          }
+        } catch (err) {
+          alert('連線失敗，請檢查網路狀態：' + err.toString());
+        } finally {
           isSubmitting.value = false;
-        }, 600);
+        }
       }
 
-      // 直接挑選教練空檔
-      function bookSlot(slot) {
+      // 直接挑選教練空檔 (透過 API 提單)
+      async function bookSlot(slot) {
         if (activeBookingsCount.value >= 2) {
           alert('您已有 2 筆進行中預約，已達上限！');
           return;
         }
 
-        const newMatId = `MAT-20260910-${Math.floor(100 + Math.random() * 900)}`;
-        myBookings.value.unshift({
-          id: newMatId,
-          courseTitle: '進階單堂精緻班 (挑選空檔)',
-          date: slot.date,
-          timeSlot: slot.timeSlot,
-          coach: slot.coachName,
-          venue: slot.venue,
-          fee: 1400,
-          status: 'Confirmed'
-        });
+        if (!confirm(`確定要預約 ${slot.coachName} 於 ${slot.date} (${slot.timeSlot}) 的空檔嗎？`)) {
+          return;
+        }
 
-        alert(`已成功登記 ${slot.coachName} 之時段！單號：${newMatId}`);
-        currentTab.value = 'myBookings';
+        isSubmitting.value = true;
+        const payload = {
+          action: 'submitStudentRequest',
+          studentUid: userProfile.userId,
+          studentName: userProfile.name,
+          courseType: '進階精緻單堂課 (挑選空檔)',
+          preferredDate: slot.date,
+          timeSlot: slot.timeSlot,
+          level: '2.5',
+          studentCount: 2,
+          designatedCoach: slot.coachName,
+          venuePreference: slot.venue,
+          notes: `由即時空檔預約 [${slot.slotId}]`
+        };
+
+        try {
+          const response = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
+          });
+          const result = await response.json();
+
+          if (result.status === 'success') {
+            alert(`已成功預約！單號：${result.reqId}，等候委員會確認！`);
+            currentTab.value = 'myBookings';
+            await loadStudentData();
+          } else {
+            alert('預約失敗：' + result.message);
+          }
+        } catch (err) {
+          alert('連線失敗：' + err.toString());
+        } finally {
+          isSubmitting.value = false;
+        }
       }
 
       // 檢查是否距開課 >= 24 小時
       function canCancelSelf(lessonDateStr) {
+        if (!lessonDateStr) return false;
         const lessonDate = new Date(lessonDateStr + 'T09:00:00');
         const now = new Date();
         const diffHours = (lessonDate - now) / (1000 * 60 * 60);
         return diffHours >= 24;
       }
 
-      // 學員自主取消
-      function cancelBooking(booking) {
-        if (confirm(`確定要取消預約單號 ${booking.id} 嗎？`)) {
-          booking.status = 'Cancelled_User';
-          alert('該預約已取消成功！');
+      // 學員線上自主取消 (真實更新 Google 試算表)
+      async function cancelBooking(booking) {
+        if (!confirm(`確定要取消預約單號 ${booking.id} 嗎？`)) return;
+
+        try {
+          const idType = booking.id.startsWith('REQ') ? 'REQ' : 'MAT';
+          const res = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'cancelStudentBooking',
+              id: booking.id,
+              idType: idType,
+              lessonDate: booking.date
+            })
+          });
+          const result = await res.json();
+          if (result.status === 'success') {
+            alert('該預約已取消成功！');
+            await loadStudentData();
+          } else {
+            alert('取消失敗：' + result.message);
+          }
+        } catch (err) {
+          alert('連線異常：' + err.toString());
         }
       }
 
-      // 加入 Google 日曆快捷連結
+      // 加入 Google 日曆
       function addToCalendar(booking) {
         const title = encodeURIComponent(`匹克球課程: ${booking.courseTitle}`);
         const details = encodeURIComponent(`單號: ${booking.id}\n執教教練: ${booking.coach}\n應備現金: NT$ ${booking.fee}`);
         const location = encodeURIComponent(booking.venue);
-        
-        // 簡易模擬日期帶入
         const dateClean = booking.date.replace(/-/g, '');
         const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&location=${location}&dates=${dateClean}T090000/${dateClean}T100000`;
-        
         window.open(gcalUrl, '_blank');
       }
 
-      // 模擬 LIFF 關閉視窗
+      // 關閉 LIFF 視窗
       function simulateCloseWindow() {
-        alert('【模擬 LIFF 行為】已成功呼叫 liff.closeWindow()，畫面已關閉並返回 LINE 群組！');
-        successModal.show = false;
+        if (typeof liff !== 'undefined' && liff.isInClient()) {
+          liff.closeWindow();
+        } else {
+          successModal.show = false;
+        }
       }
 
-      // 重置展示用 Mock Data
-      function resetMockData() {
-        myBookings.value = [
-          {
-            id: 'MAT-20260910-001',
-            courseTitle: '進階單堂精緻班 (2人)',
-            date: '2026-09-15',
-            timeSlot: '上午 (09:00-10:00)',
-            coach: '杜和益 教練',
-            venue: '宜蘭國民運動中心',
-            fee: 1400,
-            status: 'Confirmed'
-          }
-        ];
-        alert('已重置為 1 筆進行中預約，現在可以測試再度提單！');
-      }
-
-      // 標籤樣式輔助
+      // 標籤樣式
       function getStatusBadgeClass(status) {
         switch(status) {
           case 'Pending': return 'bg-amber-100 text-amber-800';
+          case 'Interested': return 'bg-blue-100 text-blue-800';
           case 'Confirmed': return 'bg-emerald-100 text-emerald-800';
-          case 'Completed': return 'bg-blue-100 text-blue-800';
+          case 'Completed': return 'bg-purple-100 text-purple-800';
           case 'Cancelled_User': 
           case 'Cancelled_Admin': return 'bg-slate-100 text-slate-500 line-through';
           default: return 'bg-slate-100 text-slate-600';
@@ -682,10 +769,11 @@
 
       function getStatusLabel(status) {
         switch(status) {
-          case 'Pending': return '待媒合/審核中';
-          case 'Confirmed': return '媒合成功 (已排程)';
+          case 'Pending': return '待媒合/未認領';
+          case 'Interested': return '已有教練接單意向';
+          case 'Confirmed': return '媒合成功 (已排課)';
           case 'Completed': return '已結課';
-          case 'Cancelled_User': return '學員已取消';
+          case 'Cancelled_User': return '學員已自主取消';
           case 'Cancelled_Admin': return '委員會取消';
           default: return status;
         }
@@ -705,13 +793,13 @@
         successModal,
         minDate,
         formatUid,
+        loadStudentData,
         submitRequest,
         bookSlot,
         canCancelSelf,
         cancelBooking,
         addToCalendar,
         simulateCloseWindow,
-        resetMockData,
         getStatusBadgeClass,
         getStatusLabel
       };
