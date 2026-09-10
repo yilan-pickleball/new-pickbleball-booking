@@ -16,6 +16,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Noto Sans TC', sans-serif; -webkit-tap-highlight-color: transparent; }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   </style>
 </head>
 <body class="bg-slate-100 text-slate-800 antialiased min-h-screen pb-24">
@@ -39,13 +41,21 @@
           <p class="text-[10px] text-blue-200 font-mono">UID: {{ formatUid(userProfile.userId) }}</p>
         </div>
       </div>
-      <!-- 切換測試身分（已核准 / 未核准） -->
-      <button 
-        @click="toggleApprovalStatus" 
-        class="text-xs bg-blue-900/90 hover:bg-blue-950 px-2 py-1 rounded-lg text-blue-100 border border-blue-600 transition"
-      >
-        {{ isApproved ? '模擬非白名單' : '切換為已核准' }}
-      </button>
+      <div class="flex items-center space-x-1.5">
+        <button 
+          @click="loadCoachData" 
+          class="text-xs bg-blue-700 hover:bg-blue-600 px-2 py-1 rounded-lg text-blue-100 border border-blue-500 transition"
+          title="重新整理"
+        >
+          🔄
+        </button>
+        <button 
+          @click="toggleApprovalStatus" 
+          class="text-xs bg-blue-900/90 hover:bg-blue-950 px-2 py-1 rounded-lg text-blue-100 border border-blue-600 transition"
+        >
+          {{ isApproved ? '模擬非白名單' : '切換已核准' }}
+        </button>
+      </div>
     </div>
   </header>
 
@@ -60,6 +70,7 @@
         <p class="text-xs text-slate-500 mt-1">本平台教練端採白名單審核制，請提交申請或聯繫委員會幹部開通。</p>
       </div>
 
+      <!-- 極簡申請表單 -->
       <div class="text-left space-y-3 pt-2">
         <div class="space-y-1">
           <label class="text-xs font-bold text-slate-600">LINE 登記暱稱 (自動帶入)</label>
@@ -68,7 +79,7 @@
 
         <div class="space-y-1">
           <label class="text-xs font-bold text-slate-600">真實姓名 <span class="text-slate-400 font-normal">(選填，委員會可代補)</span></label>
-          <input type="text" v-model="applyForm.realName" placeholder="例如：王小明" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none">
+          <input type="text" v-model="applyForm.realName" placeholder="例如：杜和益" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none">
         </div>
 
         <div class="space-y-1">
@@ -77,18 +88,18 @@
         </div>
 
         <div class="space-y-1">
-          <label class="text-xs font-bold text-slate-600">DUPR 評分或資格簡介 <span class="text-slate-400 font-normal">(選填)</span></label>
-          <input type="text" v-model="applyForm.duprRating" placeholder="例如：DUPR 3.8 / 中華匹協 C 級" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none">
+          <label class="text-xs font-bold text-slate-600">DUPR 評分或資歷簡介 <span class="text-slate-400 font-normal">(選填)</span></label>
+          <input type="text" v-model="applyForm.duprRating" placeholder="例如：DUPR 3.8 / 中華匹協認證" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none">
         </div>
       </div>
 
       <button 
         @click="submitCoachApplication" 
         :disabled="isApplying"
-        class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md transition"
+        class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center justify-center space-x-1"
       >
-        <span v-if="isApplying">送出中...</span>
-        <span v-else>立即送出審核申請</span>
+        <span v-if="isApplying" class="animate-spin mr-1">🔄</span>
+        <span>{{ isApplying ? '送出申請中...' : '立即送出審核申請' }}</span>
       </button>
 
       <a href="index.html" class="block text-xs text-slate-400 hover:text-slate-600 pt-1">
@@ -157,13 +168,14 @@
         class="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm shadow-lg shadow-blue-700/20 transition flex items-center justify-center space-x-2"
       >
         <span v-if="isPublishing" class="inline-block animate-spin mr-1">🔄</span>
-        <span>確認發布此授課時段</span>
+        <span>確認發布此授課時段 (寫入試算表)</span>
       </button>
 
+      <!-- 已發布的空檔列表 -->
       <div class="pt-4 border-t border-slate-200">
         <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">我目前開放中的空檔 ({{ mySlots.length }})</h3>
         <div v-if="mySlots.length === 0" class="text-center py-6 text-xs text-slate-400">
-          尚未開放任何空檔
+          目前試算表中無開放中的空檔
         </div>
         <div v-else class="space-y-2">
           <div 
@@ -173,12 +185,12 @@
           >
             <div>
               <span class="font-mono text-[10px] text-blue-700 font-bold bg-blue-100 px-1.5 py-0.5 rounded mr-1.5">{{ s.slotId }}</span>
-              <strong class="text-slate-800">{{ s.date }} {{ s.timeSlot }}</strong>
-              <p class="text-[11px] text-slate-500 mt-0.5">📍 {{ s.venue }}</p>
+              <strong class="text-slate-800">{{ s.slotDate || s.date }} {{ s.timeSlot }}</strong>
+              <p class="text-[11px] text-slate-500 mt-0.5">📍 {{ s.venueOption || s.venue }}</p>
             </div>
-            <button @click="withdrawSlot(s.slotId)" class="text-red-500 hover:text-red-700 text-xs px-2 py-1">
-              撤回
-            </button>
+            <span class="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">
+              {{ s.status || 'Open' }}
+            </span>
           </div>
         </div>
       </div>
@@ -191,7 +203,11 @@
         <p class="text-xs text-slate-500 mt-0.5">瀏覽學員提出的預約，點選「我有意願承接」登記意向</p>
       </div>
 
-      <div class="space-y-3">
+      <div v-if="studentRequests.length === 0" class="py-12 text-center text-slate-400 text-xs">
+        目前無待媒合的學員需求
+      </div>
+
+      <div v-else class="space-y-3">
         <div 
           v-for="req in studentRequests" 
           :key="req.reqId"
@@ -203,7 +219,7 @@
               <h3 class="text-sm font-bold text-slate-900 mt-0.5">{{ req.studentName }} 提出的預約</h3>
             </div>
             <span 
-              v-if="req.designatedCoach && req.designatedCoach.includes('杜和益')" 
+              v-if="req.designatedCoach && req.designatedCoach.includes(cleanCoachName)" 
               class="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full"
             >
               ⭐ 指定您本人 (享24h優先)
@@ -220,30 +236,30 @@
           </div>
 
           <div class="bg-slate-50 p-2.5 rounded-lg text-xs text-slate-600 space-y-1">
-            <p>🏸 班型：<strong>{{ req.courseTitle }} ({{ req.studentCount }}人)</strong></p>
-            <p>📅 期望時間：{{ req.date }} ({{ req.timeSlot }})</p>
-            <p>📍 期望球場：{{ req.venue }}</p>
+            <p>🏸 班型：<strong>{{ req.courseType }} ({{ req.studentCount }}人)</strong></p>
+            <p>📅 期望時間：{{ req.preferredDate }} ({{ req.timeSlot }})</p>
+            <p>📍 期望球場：{{ req.venuePreference }}</p>
             <p>🎯 匹克球程度：{{ req.level }}</p>
             <p v-if="req.notes" class="text-[11px] text-slate-500">💬 備註：{{ req.notes }}</p>
           </div>
 
           <div class="flex items-center justify-between text-[11px] text-slate-400 pt-1">
-            <span>已有 {{ req.interestedCoaches.length }} 位教練登記意向</span>
-            <span v-if="req.interestedCoaches.includes(userProfile.name)" class="text-emerald-600 font-bold">
+            <span>已有 {{ parseInterested(req.interestedCoaches).length }} 位教練登記意向</span>
+            <span v-if="parseInterested(req.interestedCoaches).includes(cleanCoachName)" class="text-emerald-600 font-bold">
               ✓ 您已登記承接
             </span>
           </div>
 
           <div class="pt-1">
             <button 
-              v-if="req.interestedCoaches.includes(userProfile.name)"
+              v-if="parseInterested(req.interestedCoaches).includes(cleanCoachName)"
               disabled
               class="w-full py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold cursor-not-allowed"
             >
               ✓ 已登記承接意向 (等候委員會撮合)
             </button>
             <button 
-              v-else-if="req.designatedCoach && !req.designatedCoach.includes('杜和益') && !req.designatedCoach.includes('不指定') && !req.isExpired24h"
+              v-else-if="isLockedByOther(req)"
               disabled
               class="w-full py-2 bg-slate-100 text-slate-400 rounded-lg text-xs cursor-not-allowed"
             >
@@ -265,11 +281,11 @@
     <section v-if="currentTab === 'schedule'" class="space-y-4">
       <div class="border-b pb-3">
         <h1 class="text-xl font-bold text-slate-900">我的正式課表</h1>
-        <p class="text-xs text-slate-500 mt-0.5">授課結束後請點擊「完課簽到」回報學費與出勤紀錄</p>
+        <p class="text-xs text-slate-500 mt-0.5">授課結束後請點擊「完課簽到」回報實收學費與出勤教練</p>
       </div>
 
       <div v-if="myMatches.length === 0" class="py-16 text-center text-slate-400 text-xs">
-        目前尚無確認排程之課表
+        目前尚無確認排程之正式課表
       </div>
 
       <div v-else class="space-y-3">
@@ -289,21 +305,20 @@
               }"
               class="text-[10px] font-bold px-2 py-0.5 rounded-full"
             >
-              {{ m.status === 'Confirmed' ? '排定上課中' : (m.status === 'Completed' ? '✓ 已完課簽到 (待記帳)' : '💰 薪資已核銷結清') }}
+              {{ m.status === 'Confirmed' ? '排定上課中' : (m.status === 'Completed' ? '✓ 已完課簽到 (待核銷)' : '💰 薪資已核銷結清') }}
             </span>
           </div>
 
           <div class="text-xs text-slate-600 space-y-1">
-            <p class="text-sm font-bold text-slate-900">{{ m.courseTitle }}</p>
-            <p>📅 上課時間：<strong class="text-slate-800">{{ m.date }} ({{ m.timeSlot }})</strong></p>
+            <p class="text-sm font-bold text-slate-900">{{ m.courseType }}</p>
+            <p>📅 上課時間：<strong class="text-slate-800">{{ m.lessonDate }} ({{ m.lessonTime }})</strong></p>
             <p>📍 上課場地：<strong>{{ m.venue }}</strong></p>
-            <p>👤 上課學員：{{ m.studentName }} ({{ m.studentCount }} 人)</p>
-            <p class="text-blue-700 font-semibold">💵 應收現金學費：NT$ {{ (m.expectedFee || 1400).toLocaleString() }}</p>
+            <p>👤 上課學員：{{ m.studentName }}</p>
+            <p class="text-blue-700 font-semibold">💵 應收現金學費：NT$ {{ Number(m.expectedFee || 1400).toLocaleString() }}</p>
           </div>
 
           <!-- 操作動作列 -->
           <div class="pt-2 flex items-center space-x-2">
-            <!-- 加入 Google 日曆 -->
             <button 
               @click="addToCalendar(m)"
               class="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition flex items-center justify-center space-x-1"
@@ -344,7 +359,7 @@
 
       <!-- 課程摘要 -->
       <div class="bg-slate-50 p-3 rounded-xl text-xs space-y-1 text-slate-600">
-        <p>🏸 課程：<strong>{{ checkinModal.targetMatch?.courseTitle }}</strong></p>
+        <p>🏸 課程：<strong>{{ checkinModal.targetMatch?.courseType }}</strong></p>
         <p>👤 學員：{{ checkinModal.targetMatch?.studentName }}</p>
         <p>📍 場地：{{ checkinModal.targetMatch?.venue }}</p>
       </div>
@@ -362,27 +377,11 @@
         </div>
 
         <div>
-          <label class="font-bold text-slate-700 block mb-1">現場共同執教教練人數</label>
-          <div class="flex space-x-2">
-            <button 
-              v-for="n in [1, 2, 3]" 
-              :key="n"
-              type="button"
-              @click="checkinModal.coachCount = n"
-              :class="checkinModal.coachCount === n ? 'bg-blue-600 text-white font-bold' : 'bg-slate-100 text-slate-700'"
-              class="flex-1 py-1.5 rounded-lg text-xs transition"
-            >
-              {{ n }} 位教練
-            </button>
-          </div>
-        </div>
-
-        <div>
-          <label class="font-bold text-slate-700 block mb-1">執教教練名單備註</label>
+          <label class="font-bold text-slate-700 block mb-1">共同執教教練名單備註</label>
           <input 
             type="text" 
             v-model="checkinModal.coachNames" 
-            placeholder="例如：杜和益、王教練" 
+            placeholder="例如：杜和益, 王教練" 
             class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
           >
         </div>
@@ -392,9 +391,11 @@
       <div class="space-y-2 pt-2">
         <button 
           @click="submitCheckin" 
-          class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition"
+          :disabled="isCheckingIn"
+          class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center justify-center space-x-1"
         >
-          確認送出完課簽到 (同步至委員會)
+          <span v-if="isCheckingIn" class="animate-spin mr-1">🔄</span>
+          <span>確認送出完課簽到 (寫入試算表)</span>
         </button>
         <button 
           @click="checkinModal.show = false" 
@@ -442,19 +443,21 @@
 <script>
   const { createApp, ref, reactive, computed, onMounted } = Vue;
 
-  const COACH_LIFF_ID = "";
+  // 專屬 Google Apps Script API 部署網址
+  const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwe_Xh7I8iOMDBK278mvBIIeXaVa9B3qz8bl2RfdEFT0elPW9Ff7Vg3p2sHm3COUdfkmA/exec";
+  const COACH_LIFF_ID = "2011535009-IsC8f5XW"; 
 
   createApp({
     setup() {
       const isApproved = ref(true);
-      const currentTab = ref('schedule'); // 進入預設可直接看到課表與簽到
+      const currentTab = ref('schedule');
       const isPublishing = ref(false);
       const isApplying = ref(false);
+      const isCheckingIn = ref(false);
 
       const userProfile = reactive({
         userId: 'Ud857f472593d4263cdf8353f1e34ef88',
-        name: '杜和益 (教練)',
-        pictureUrl: ''
+        name: '杜和益 (教練)'
       });
 
       const applyForm = reactive({
@@ -481,71 +484,22 @@
         venueOption: '宜蘭國民運動中心'
       });
 
-      const mySlots = ref([
-        {
-          slotId: 'SLOT-20260912-001',
-          date: '2026-09-12',
-          timeSlot: '上午 (09:00-11:00)',
-          venue: '宜蘭國民運動中心'
-        }
-      ]);
+      // 資料池
+      const mySlots = ref([]);
+      const studentRequests = ref([]);
+      const myMatches = ref([]);
 
-      const studentRequests = ref([
-        {
-          reqId: 'REQ-20260910-001',
-          studentName: '陳大文',
-          courseTitle: '進階單堂精緻班',
-          studentCount: 2,
-          date: '2026-09-16',
-          timeSlot: '下午 (14:00-17:00)',
-          venue: '宜蘭國民運動中心',
-          level: '2.5',
-          notes: '希望能重點糾正反手第三拍落點',
-          designatedCoach: '杜和益 教練',
-          isExpired24h: false,
-          interestedCoaches: []
-        }
-      ]);
-
-      // 課表資料（支援從 LocalStorage 讀取與跨頁同步）
-      const myMatches = ref([
-        {
-          matId: 'MAT-20260915-001',
-          courseTitle: '進階精緻單堂課 (2人)',
-          studentName: '杜小明 等 2 人',
-          studentCount: 2,
-          date: '2026-09-15',
-          timeSlot: '09:00-10:00',
-          venue: '宜蘭國民運動中心',
-          expectedFee: 1400,
-          status: 'Confirmed', // Confirmed (排定中) -> Completed (已完課簽到) -> Settled (已結算)
-          actualRevenue: 1400,
-          coachCount: 1,
-          coachNames: '杜和益 教練'
-        },
-        {
-          matId: 'MAT-20260918-002',
-          courseTitle: '初階團體培訓班 (4人成班)',
-          studentName: '林小姐等4人',
-          studentCount: 4,
-          date: '2026-09-18',
-          timeSlot: '18:00-19:00',
-          venue: '宜蘭運動公園風雨光電球場',
-          expectedFee: 6000,
-          status: 'Confirmed',
-          actualRevenue: 6000,
-          coachCount: 2,
-          coachNames: '杜和益 教練、王教練'
-        }
-      ]);
-
-      // 簽到 Modal 控制
+      // 完課簽到 Modal 控制
       const checkinModal = reactive({
         show: false,
         targetMatch: null,
         actualRevenue: 1400,
-        coachCount: 1,
-        coachNames: '杜和益 教練'
+        coachNames: ''
+      });
+
+      // 取得純淨的教練名稱 (排除標籤字樣)
+      const cleanCoachName = computed(() => {
+        return userProfile.name.replace(/ \(教練\)/g, '').replace(/ \(學員\)/g, '').trim();
       });
 
       function getTomorrowDate() {
@@ -564,109 +518,195 @@
         isApproved.value = !isApproved.value;
       }
 
-      function submitCoachApplication() {
+      function parseInterested(raw) {
+        if (!raw) return [];
+        if (Array.isArray(raw)) return raw;
+        try {
+          return JSON.parse(raw);
+        } catch (e) {
+          return [];
+        }
+      }
+
+      // 判斷是否被指定給其他教練且在 24 小時內鎖定
+      function isLockedByOther(req) {
+        if (!req.designatedCoach || req.designatedCoach.includes('不指定')) return false;
+        if (req.designatedCoach.includes(cleanCoachName.value)) return false;
+        
+        // 若指定他人，比對建立時間是否小於 24 小時
+        if (!req.createdAt) return true;
+        const created = new Date(req.createdAt.replace(/-/g, '/'));
+        const now = new Date();
+        const diffHours = (now - created) / (1000 * 60 * 60);
+        return diffHours < 24;
+      }
+
+      // 從後端 GAS 讀取教練資料
+      async function loadCoachData() {
+        try {
+          const res = await fetch(`${GAS_API_URL}?action=getCoachData&uid=${userProfile.userId}`);
+          const data = await res.json();
+          if (data.status === 'success') {
+            isApproved.value = data.isApproved;
+            studentRequests.value = data.poolRequests || [];
+            myMatches.value = data.myLessons || [];
+            mySlots.value = data.mySlots || [];
+          }
+        } catch (err) {
+          console.error('教練資料同步失敗:', err);
+        }
+      }
+
+      // 提交教練審核申請
+      async function submitCoachApplication() {
         isApplying.value = true;
-        setTimeout(() => {
-          alert('申請已成功送出！請等候委員會幹部核准白名單。');
-          isApplying.value = false;
-          isApproved.value = true;
-        }, 600);
-      }
-
-      function publishSlot() {
-        isPublishing.value = true;
-        setTimeout(() => {
-          const newSlotId = `SLOT-20260910-${Math.floor(100 + Math.random() * 900)}`;
-          mySlots.value.unshift({
-            slotId: newSlotId,
-            date: slotForm.date,
-            timeSlot: slotForm.timeSlot,
-            venue: slotForm.venueOption
+        try {
+          const payload = {
+            action: 'applyCoach',
+            coachUid: userProfile.userId,
+            realName: applyForm.realName || cleanCoachName.value,
+            displayName: userProfile.name,
+            phone: applyForm.phone,
+            duprRating: applyForm.duprRating
+          };
+          const res = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
           });
-          alert(`空檔發布成功！單號：${newSlotId}`);
+          const result = await res.json();
+          alert(result.message || '申請已送出！');
+          await loadCoachData();
+        } catch (err) {
+          alert('連線失敗：' + err.toString());
+        } finally {
+          isApplying.value = false;
+        }
+      }
+
+      // 發布授課空檔
+      async function publishSlot() {
+        isPublishing.value = true;
+        try {
+          const payload = {
+            action: 'submitCoachSlot',
+            coachUid: userProfile.userId,
+            coachName: cleanCoachName.value,
+            slotDate: slotForm.date,
+            timeSlot: slotForm.timeSlot,
+            venueOption: slotForm.venueOption
+          };
+          const res = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
+          });
+          const result = await res.json();
+          if (result.status === 'success') {
+            alert(`空檔發布成功！單號：${result.slotId}`);
+            await loadCoachData();
+          } else {
+            alert('發布失敗：' + result.message);
+          }
+        } catch (err) {
+          alert('發布異常：' + err.toString());
+        } finally {
           isPublishing.value = false;
-        }, 500);
-      }
-
-      function withdrawSlot(slotId) {
-        if (confirm(`確定要撤回時段單號 ${slotId} 嗎？`)) {
-          mySlots.value = mySlots.value.filter(s => s.slotId !== slotId);
         }
       }
 
-      function claimInterest(req) {
-        if (!req.interestedCoaches.includes(userProfile.name)) {
-          req.interestedCoaches.push(userProfile.name);
-          alert(`已成功登記意向！委員會將綜合評估後通知媒合結果。`);
+      // 登記接單意向
+      async function claimInterest(req) {
+        try {
+          const payload = {
+            action: 'expressCoachInterest',
+            reqId: req.reqId,
+            coachName: cleanCoachName.value
+          };
+          const res = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
+          });
+          const result = await res.json();
+          if (result.status === 'success') {
+            alert('已成功登記承接意向！委員會將綜合評估後撮合。');
+            await loadCoachData();
+          } else {
+            alert('登記失敗：' + result.message);
+          }
+        } catch (err) {
+          alert('連線異常：' + err.toString());
         }
-      }
-
-      function addToCalendar(match) {
-        const title = encodeURIComponent(`匹克球執教: ${match.courseTitle}`);
-        const details = encodeURIComponent(`單號: ${match.matId}\n學員: ${match.studentName}`);
-        const location = encodeURIComponent(match.venue);
-        const dateClean = match.date.replace(/-/g, '');
-        const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&location=${location}&dates=${dateClean}T090000/${dateClean}T100000`;
-        window.open(gcalUrl, '_blank');
       }
 
       // 開啟完課簽到彈窗
       function openCheckinModal(match) {
         checkinModal.targetMatch = match;
-        checkinModal.actualRevenue = match.expectedFee || 1400;
-        checkinModal.coachCount = match.coachCount || 1;
-        checkinModal.coachNames = match.coachNames || userProfile.name;
+        checkinModal.actualRevenue = Number(match.expectedFee) || 1400;
+        checkinModal.coachNames = match.coachNames || cleanCoachName.value;
         checkinModal.show = true;
       }
 
       // 提交完課簽到
-      function submitCheckin() {
+      async function submitCheckin() {
         if (!checkinModal.targetMatch) return;
-        const target = checkinModal.targetMatch;
-
-        // 更新此筆課表狀態
-        target.status = 'Completed'; // 標記為已完課
-        target.actualRevenue = checkinModal.actualRevenue;
-        target.coachCount = checkinModal.coachCount;
-        target.coachNames = checkinModal.coachNames;
-
-        // 寫入 LocalStorage，讓委員會頁面能即時獲取此筆完課資料
-        syncMatchesToStorage();
-
-        alert(`單號 ${target.matId} 完課簽到成功！\n實收現金：NT$ ${target.actualRevenue}\n出勤教練：${target.coachNames} (${target.coachCount}人)\n已將資料同步至委員會後台等待均分記帳！`);
-        checkinModal.show = false;
+        isCheckingIn.value = true;
+        try {
+          const payload = {
+            action: 'coachCompleteLesson',
+            matId: checkinModal.targetMatch.matId,
+            actualRevenue: checkinModal.actualRevenue,
+            coachNames: checkinModal.coachNames
+          };
+          const res = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
+          });
+          const result = await res.json();
+          if (result.status === 'success') {
+            alert('完課簽到成功！資料已同步至委員會後台等待核銷記帳。');
+            checkinModal.show = false;
+            await loadCoachData();
+          } else {
+            alert('簽到失敗：' + result.message);
+          }
+        } catch (err) {
+          alert('連線異常：' + err.toString());
+        } finally {
+          isCheckingIn.value = false;
+        }
       }
 
-      function syncMatchesToStorage() {
-        localStorage.setItem('pickle_matches', JSON.stringify(myMatches.value));
+      // 加入 Google 日曆
+      function addToCalendar(match) {
+        const title = encodeURIComponent(`匹克球執教: ${match.courseType}`);
+        const details = encodeURIComponent(`單號: ${match.matId}\n學員: ${match.studentName}`);
+        const location = encodeURIComponent(match.venue);
+        const dateClean = (match.lessonDate || '').replace(/-/g, '');
+        const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&location=${location}&dates=${dateClean}T090000/${dateClean}T100000`;
+        window.open(gcalUrl, '_blank');
       }
 
       onMounted(async () => {
-        const savedUid = localStorage.getItem('pickle_uid');
-        const savedName = localStorage.getItem('pickle_name');
-        if (savedUid) userProfile.userId = savedUid;
-        if (savedName) userProfile.name = savedName + ' (教練)';
-
-        // 檢查是否有儲存過之排程
-        const savedMatches = localStorage.getItem('pickle_matches');
-        if (savedMatches) {
-          try {
-            myMatches.value = JSON.parse(savedMatches);
-          } catch(e) {}
-        } else {
-          syncMatchesToStorage();
-        }
-
         if (COACH_LIFF_ID && typeof liff !== 'undefined') {
           try {
             await liff.init({ liffId: COACH_LIFF_ID });
-            if (liff.isLoggedIn()) {
-              const profile = await liff.getProfile();
-              userProfile.userId = profile.userId;
-              userProfile.name = profile.displayName + ' (教練)';
+            if (!liff.isLoggedIn()) {
+              liff.login();
+              return;
             }
-          } catch (e) {}
+            const profile = await liff.getProfile();
+            userProfile.userId = profile.userId;
+            userProfile.name = profile.displayName + ' (教練)';
+          } catch (e) {
+            console.warn('教練 LIFF 初始化異常，使用預設教練身分:', e);
+          }
         }
+
+        // 載入 Google 試算表即時資料
+        await loadCoachData();
       });
 
       return {
@@ -684,15 +724,19 @@
         minDate,
         isPublishing,
         isApplying,
+        isCheckingIn,
+        cleanCoachName,
         formatUid,
         toggleApprovalStatus,
+        parseInterested,
+        isLockedByOther,
+        loadCoachData,
         submitCoachApplication,
         publishSlot,
-        withdrawSlot,
         claimInterest,
-        addToCalendar,
         openCheckinModal,
-        submitCheckin
+        submitCheckin,
+        addToCalendar
       };
     }
   }).mount('#app');
