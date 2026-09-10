@@ -151,7 +151,7 @@
               class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-purple-500 focus:outline-none"
             >
               <option value="">-- 請選擇指派教練 --</option>
-              <option v-for="c in approvedCoaches" :key="c" :value="c">{{ c }}</option>
+              <option v-for="c in approvedCoachesNames" :key="c" :value="c">{{ c }}</option>
             </select>
           </div>
 
@@ -234,7 +234,7 @@
           <label class="font-bold text-slate-700">指定教練 (選填)</label>
           <select v-model="proxyForm.designatedCoach" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
             <option value="">不指定 (由委員會調度)</option>
-            <option v-for="c in approvedCoaches" :key="c" :value="c">{{ c }}</option>
+            <option v-for="c in approvedCoachesNames" :key="c" :value="c">{{ c }}</option>
           </select>
         </div>
 
@@ -287,17 +287,20 @@
       </div>
     </section>
 
-    <!-- Tab 3: 白名單審核中心 (含核准與拒絕機制) -->
+    <!-- Tab 3: 白名單審核中心與教練名冊 -->
     <section v-if="currentTab === 'whitelist'" class="space-y-5">
       <div class="border-b pb-3">
         <h1 class="text-xl font-bold text-slate-900">白名單與權限審核</h1>
         <p class="text-xs text-slate-500 mt-0.5">免手打 UID 一鍵審核教練與幹部資格</p>
       </div>
 
-      <!-- 待審核教練 (支援核准與拒絕) -->
+      <!-- 1. 待審核教練申請 (支援核准與拒絕刪除) -->
       <div class="space-y-3">
-        <h2 class="text-sm font-bold text-slate-800">待審核教練名冊 ({{ pendingCoaches.length }})</h2>
-        <div v-if="pendingCoaches.length === 0" class="py-4 text-center text-slate-400 text-xs bg-slate-50 rounded-xl">
+        <div class="flex justify-between items-center">
+          <h2 class="text-sm font-bold text-slate-800">待審核教練申請 ({{ pendingCoaches.length }})</h2>
+          <span v-if="pendingCoaches.length > 0" class="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">待處理</span>
+        </div>
+        <div v-if="pendingCoaches.length === 0" class="py-3 text-center text-slate-400 text-xs bg-slate-50 rounded-xl">
           目前無待審核教練
         </div>
         <div v-for="c in pendingCoaches" :key="c.coachUid" class="p-3 bg-white border border-slate-200 rounded-xl space-y-2 text-xs">
@@ -323,10 +326,45 @@
         </div>
       </div>
 
-      <!-- 待審核幹部 -->
+      <!-- 2. ⭐ 目前審核通過的正式認證教練總表 -->
+      <div class="space-y-3 pt-3 border-t border-slate-200">
+        <div class="flex justify-between items-center">
+          <h2 class="text-sm font-bold text-slate-800">已認證正式教練總表 ({{ approvedCoachesList.length }})</h2>
+          <span class="text-[11px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded">白名單生效中</span>
+        </div>
+        
+        <div v-if="approvedCoachesList.length === 0" class="py-4 text-center text-slate-400 text-xs bg-slate-50 rounded-xl">
+          目前無已核准之教練
+        </div>
+
+        <div v-else class="space-y-2">
+          <div 
+            v-for="c in approvedCoachesList" 
+            :key="c.coachUid"
+            class="p-3 bg-white border border-slate-200 rounded-xl shadow-sm text-xs space-y-1.5"
+          >
+            <div class="flex justify-between items-start">
+              <div>
+                <strong class="text-sm text-slate-900">{{ c.realName || c.displayName }} 教練</strong>
+                <p class="text-[10px] text-slate-400 font-mono">UID: {{ formatUid(c.coachUid) }}</p>
+              </div>
+              <span class="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                ✓ 認證教練
+              </span>
+            </div>
+            <div class="grid grid-cols-2 gap-1 text-[11px] text-slate-600 bg-slate-50 p-2 rounded-lg">
+              <p>📞 電話：{{ c.phone || '無' }}</p>
+              <p>🏆 資歷：{{ c.duprRating || '未登錄' }}</p>
+              <p class="col-span-2 text-[10px] text-slate-400">核准幹部：{{ c.approvedBy || '系統管理員' }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. 待審核幹部 -->
       <div class="space-y-3 pt-3 border-t border-slate-200">
         <h2 class="text-sm font-bold text-slate-800">待審核委員會幹部 ({{ pendingAdmins.length }})</h2>
-        <div v-if="pendingAdmins.length === 0" class="py-4 text-center text-slate-400 text-xs bg-slate-50 rounded-xl">
+        <div v-if="pendingAdmins.length === 0" class="py-3 text-center text-slate-400 text-xs bg-slate-50 rounded-xl">
           目前無新幹部申請
         </div>
         <div v-for="a in pendingAdmins" :key="a.adminUid" class="p-3 bg-white border border-slate-200 rounded-xl space-y-2 text-xs">
@@ -514,7 +552,6 @@
               </div>
             </div>
 
-            <!-- 課堂薪資明細 -->
             <div class="p-3 space-y-2 bg-white">
               <div 
                 v-for="item in coach.items" 
@@ -607,7 +644,7 @@
   createApp({
     setup() {
       const adminProfile = reactive({
-        userId: 'Ud471b1a7217b649b3599b54700d352c9', // ⭐ 您的真實創世 UID
+        userId: 'Ud471b1a7217b649b3599b54700d352c9',
         name: '杜和益 (創世幹部)'
       });
 
@@ -641,10 +678,16 @@
         coachNames: ''
       });
 
-      const approvedCoaches = computed(() => {
+      // 取得所有核准之教練名稱 (供下拉選單)
+      const approvedCoachesNames = computed(() => {
         return rawCoaches.value
           .filter(c => c.status === 'Approved')
           .map(c => c.realName ? (c.realName.includes('教練') ? c.realName : c.realName + ' 教練') : (c.displayName || '教練'));
+      });
+
+      // ⭐ 取得已核准教練之完整物件陣列 (供白名單總表卡片呈現)
+      const approvedCoachesList = computed(() => {
+        return rawCoaches.value.filter(c => c.status === 'Approved');
       });
 
       const pendingRequests = computed(() => {
@@ -661,7 +704,6 @@
         return allMatches.value.filter(m => m.status === 'Completed');
       });
 
-      // 待審核教練名冊 (狀態為 Coach_Pending)
       const pendingCoaches = computed(() => {
         return rawCoaches.value.filter(c => c.status === 'Coach_Pending');
       });
@@ -681,7 +723,7 @@
 
       const coachPayrollSummaries = computed(() => {
         const map = {};
-        approvedCoaches.value.forEach(name => {
+        approvedCoachesNames.value.forEach(name => {
           map[name] = { name: name, pendingAmount: 0, paidAmount: 0, items: [] };
         });
 
@@ -913,7 +955,6 @@
         }
       }
 
-      // 核准教練加入白名單
       async function approveCoach(coach) {
         try {
           const res = await fetch(GAS_API_URL, {
@@ -933,10 +974,9 @@
         }
       }
 
-      // ⭐ 拒絕教練申請 (防誤觸或不合規)
       async function rejectCoach(coach) {
         const name = coach.realName || coach.displayName;
-        if (!confirm(`確定要拒絕「${name}」的教練資格申請嗎？\n拒絕後此申請將自審核名冊移除。`)) return;
+        if (!confirm(`確定要拒絕「${name}」的教練資格申請嗎？\n拒絕後此申請將自審核名冊直接刪除。`)) return;
 
         try {
           const res = await fetch(GAS_API_URL, {
@@ -949,7 +989,7 @@
             })
           });
           const result = await res.json();
-          alert(result.message || '已拒絕該教練申請！');
+          alert(result.message || '已拒絕並刪除該教練申請！');
           await loadAdminData();
         } catch (err) {
           alert('審核異常：' + err.toString());
@@ -1090,7 +1130,8 @@
         calcForm,
         selectedMatId,
         currentSelectedMatch,
-        approvedCoaches,
+        approvedCoachesNames,
+        approvedCoachesList,
         pendingRequests,
         allMatches,
         completedMatches,
