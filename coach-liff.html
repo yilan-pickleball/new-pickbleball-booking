@@ -89,7 +89,7 @@
 
         <div class="space-y-1">
           <label class="text-xs font-bold text-slate-600">DUPR 評分或資歷簡介 <span class="text-slate-400 font-normal">(選填)</span></label>
-          <input type="text" v-model="applyForm.duprRating" placeholder="例如：DUPR 3.8 / 中華匹協認證" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none">
+          <input type="text" v-model="applyForm.duprRating" placeholder="例如：PPR L1 & YD / DUPR 3.8" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none">
         </div>
       </div>
 
@@ -171,7 +171,6 @@
         <span>確認發布此授課時段 (寫入試算表)</span>
       </button>
 
-      <!-- 已發布的空檔列表 -->
       <div class="pt-4 border-t border-slate-200">
         <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">我目前開放中的空檔 ({{ mySlots.length }})</h3>
         <div v-if="mySlots.length === 0" class="text-center py-6 text-xs text-slate-400">
@@ -294,7 +293,6 @@
           :key="m.matId"
           class="p-4 bg-white border border-slate-200 rounded-xl shadow-sm space-y-2.5 relative"
         >
-          <!-- 狀態標籤 -->
           <div class="flex justify-between items-center pb-2 border-b border-slate-100">
             <span class="font-mono text-xs font-bold text-blue-700">{{ m.matId }}</span>
             <span 
@@ -317,7 +315,6 @@
             <p class="text-blue-700 font-semibold">💵 應收現金學費：NT$ {{ Number(m.expectedFee || 1400).toLocaleString() }}</p>
           </div>
 
-          <!-- 操作動作列 -->
           <div class="pt-2 flex items-center space-x-2">
             <button 
               @click="addToCalendar(m)"
@@ -326,7 +323,6 @@
               <span>📅 加入日曆</span>
             </button>
 
-            <!-- 完課簽到按鈕（排定中可點擊） -->
             <button 
               v-if="m.status === 'Confirmed'"
               @click="openCheckinModal(m)"
@@ -335,7 +331,6 @@
               <span>📍 完課簽到回報</span>
             </button>
 
-            <!-- 已完課徽章狀態 -->
             <div v-else class="flex-1 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs text-center font-bold">
               {{ m.status === 'Settled' ? '✓ 薪資已核銷' : '✓ 簽到已回報後台' }}
             </div>
@@ -357,14 +352,12 @@
         <p class="text-xs text-slate-500 font-mono mt-0.5">{{ checkinModal.targetMatch?.matId }}</p>
       </div>
 
-      <!-- 課程摘要 -->
       <div class="bg-slate-50 p-3 rounded-xl text-xs space-y-1 text-slate-600">
         <p>🏸 課程：<strong>{{ checkinModal.targetMatch?.courseType }}</strong></p>
         <p>👤 學員：{{ checkinModal.targetMatch?.studentName }}</p>
         <p>📍 場地：{{ checkinModal.targetMatch?.venue }}</p>
       </div>
 
-      <!-- 簽到回報內容確認 -->
       <div class="space-y-3 text-xs">
         <div>
           <label class="font-bold text-slate-700 block mb-1">現場實收現金學費 (NT$) <span class="text-red-500">*</span></label>
@@ -387,7 +380,6 @@
         </div>
       </div>
 
-      <!-- 送出或關閉 -->
       <div class="space-y-2 pt-2">
         <button 
           @click="submitCheckin" 
@@ -443,7 +435,6 @@
 <script>
   const { createApp, ref, reactive, computed, onMounted } = Vue;
 
-  // 專屬 Google Apps Script API 部署網址
   const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwe_Xh7I8iOMDBK278mvBIIeXaVa9B3qz8bl2RfdEFT0elPW9Ff7Vg3p2sHm3COUdfkmA/exec";
   const COACH_LIFF_ID = "2011535009-IsC8f5XW"; 
 
@@ -456,7 +447,7 @@
       const isCheckingIn = ref(false);
 
       const userProfile = reactive({
-        userId: 'Ud857f472593d4263cdf8353f1e34ef88',
+        userId: 'Ud471b1a7217b649b3599b54700d352c9',
         name: '杜和益 (教練)'
       });
 
@@ -484,12 +475,10 @@
         venueOption: '宜蘭國民運動中心'
       });
 
-      // 資料池
       const mySlots = ref([]);
       const studentRequests = ref([]);
       const myMatches = ref([]);
 
-      // 完課簽到 Modal 控制
       const checkinModal = reactive({
         show: false,
         targetMatch: null,
@@ -497,7 +486,6 @@
         coachNames: ''
       });
 
-      // 取得純淨的教練名稱 (排除標籤字樣)
       const cleanCoachName = computed(() => {
         return userProfile.name.replace(/ \(教練\)/g, '').replace(/ \(學員\)/g, '').trim();
       });
@@ -528,12 +516,10 @@
         }
       }
 
-      // 判斷是否被指定給其他教練且在 24 小時內鎖定
       function isLockedByOther(req) {
         if (!req.designatedCoach || req.designatedCoach.includes('不指定')) return false;
         if (req.designatedCoach.includes(cleanCoachName.value)) return false;
         
-        // 若指定他人，比對建立時間是否小於 24 小時
         if (!req.createdAt) return true;
         const created = new Date(req.createdAt.replace(/-/g, '/'));
         const now = new Date();
@@ -541,7 +527,6 @@
         return diffHours < 24;
       }
 
-      // 從後端 GAS 讀取教練資料
       async function loadCoachData() {
         try {
           const res = await fetch(`${GAS_API_URL}?action=getCoachData&uid=${userProfile.userId}`);
@@ -557,7 +542,7 @@
         }
       }
 
-      // 提交教練審核申請
+      // ⭐ 提交審核申請：完成後提示並自動跳回入口首頁
       async function submitCoachApplication() {
         isApplying.value = true;
         try {
@@ -575,8 +560,11 @@
             body: JSON.stringify(payload)
           });
           const result = await res.json();
-          alert(result.message || '申請已送出！');
-          await loadCoachData();
+          
+          alert(result.message || '教練申請已成功送出！請等候委員會核准。現在將為您返回首頁。');
+          
+          // ⭐ 自動導回身分選擇入口首頁
+          window.location.href = 'index.html';
         } catch (err) {
           alert('連線失敗：' + err.toString());
         } finally {
@@ -584,7 +572,6 @@
         }
       }
 
-      // 發布授課空檔
       async function publishSlot() {
         isPublishing.value = true;
         try {
@@ -615,7 +602,6 @@
         }
       }
 
-      // 登記接單意向
       async function claimInterest(req) {
         try {
           const payload = {
@@ -640,7 +626,6 @@
         }
       }
 
-      // 開啟完課簽到彈窗
       function openCheckinModal(match) {
         checkinModal.targetMatch = match;
         checkinModal.actualRevenue = Number(match.expectedFee) || 1400;
@@ -648,7 +633,6 @@
         checkinModal.show = true;
       }
 
-      // 提交完課簽到
       async function submitCheckin() {
         if (!checkinModal.targetMatch) return;
         isCheckingIn.value = true;
@@ -679,7 +663,6 @@
         }
       }
 
-      // 加入 Google 日曆
       function addToCalendar(match) {
         const title = encodeURIComponent(`匹克球執教: ${match.courseType}`);
         const details = encodeURIComponent(`單號: ${match.matId}\n學員: ${match.studentName}`);
@@ -705,7 +688,6 @@
           }
         }
 
-        // 載入 Google 試算表即時資料
         await loadCoachData();
       });
 
