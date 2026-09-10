@@ -16,6 +16,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Noto Sans TC', sans-serif; -webkit-tap-highlight-color: transparent; }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   </style>
 </head>
 <body class="bg-slate-100 text-slate-800 antialiased min-h-screen pb-24">
@@ -33,23 +35,31 @@
           <div class="flex items-center space-x-1.5">
             <span class="font-bold text-sm tracking-wide">{{ adminProfile.name }}</span>
             <span :class="isAdminApproved ? 'bg-purple-600' : 'bg-amber-600'" class="text-[10px] px-1.5 py-0.5 rounded font-medium">
-              {{ isAdminApproved ? '委員會幹部' : '無權限' }}
+              {{ isAdminApproved ? '委員會幹部' : '審核中/無權限' }}
             </span>
           </div>
           <p class="text-[10px] text-slate-400 font-mono">UID: {{ formatUid(adminProfile.userId) }}</p>
         </div>
       </div>
-      <!-- 測試切換按鈕 -->
-      <button 
-        @click="isAdminApproved = !isAdminApproved" 
-        class="text-xs bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded text-slate-300 border border-slate-600 transition"
-      >
-        {{ isAdminApproved ? '模擬非幹部' : '恢復幹部權限' }}
-      </button>
+      <div class="flex items-center space-x-1.5">
+        <button 
+          @click="loadAdminData" 
+          class="text-xs bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded text-slate-200 border border-slate-600 transition"
+          title="從 Google 試算表重新整理"
+        >
+          🔄
+        </button>
+        <button 
+          @click="toggleAdminStatus" 
+          class="text-xs bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded text-slate-300 border border-slate-600 transition"
+        >
+          {{ isAdminApproved ? '模擬非幹部' : '恢復權限' }}
+        </button>
+      </div>
     </div>
   </header>
 
-  <!-- 情況 A：非委員會人員攔截門禁 -->
+  <!-- 情況 A：非委員會管理員攔截門禁 -->
   <main v-if="!isAdminApproved" class="flex-1 p-6 flex flex-col justify-center">
     <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm text-center space-y-4">
       <div class="w-14 h-14 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto text-2xl font-bold">
@@ -75,9 +85,11 @@
 
       <button 
         @click="applyForAdmin" 
-        class="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-md transition"
+        :disabled="isApplyingAdmin"
+        class="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center justify-center space-x-1"
       >
-        線上申請加入委員會幹部
+        <span v-if="isApplyingAdmin" class="animate-spin mr-1">🔄</span>
+        <span>{{ isApplyingAdmin ? '送出申請中...' : '線上申請加入委員會幹部' }}</span>
       </button>
 
       <a href="index.html" class="block text-xs text-slate-400 hover:text-slate-600 pt-1">
@@ -94,7 +106,7 @@
       <div class="border-b pb-3 flex justify-between items-end">
         <div>
           <h1 class="text-xl font-bold text-slate-900">需求撮合工作台</h1>
-          <p class="text-xs text-slate-500 mt-0.5">學員求課清單 ↔ 教練意向調度</p>
+          <p class="text-xs text-slate-500 mt-0.5">學員需求池 ↔ 教練意向調度</p>
         </div>
         <span class="text-xs bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded-full">
           待媒合: {{ pendingRequests.length }}
@@ -117,7 +129,7 @@
               <h3 class="text-sm font-bold text-slate-900 mt-0.5">{{ req.studentName }} ({{ req.courseType }})</h3>
             </div>
             <span class="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
-              {{ req.designatedCoach ? '⭐ 指定：' + req.designatedCoach : '公開媒合' }}
+              {{ req.designatedCoach && !req.designatedCoach.includes('不指定') ? '⭐ 指定：' + req.designatedCoach : '公開媒合' }}
             </span>
           </div>
 
@@ -132,7 +144,7 @@
           <div class="space-y-1.5 pt-1">
             <div class="flex justify-between items-center text-xs">
               <label class="font-bold text-slate-700">指派授課教練：</label>
-              <span class="text-[11px] text-slate-400">登記意向：{{ req.interestedCoaches.join('、') || '無' }}</span>
+              <span class="text-[11px] text-slate-400">登記意向：{{ parseInterested(req.interestedCoaches).join('、') || '無' }}</span>
             </div>
             <select 
               v-model="req.assignedCoach" 
@@ -156,7 +168,7 @@
             </select>
           </div>
 
-          <!-- 衝堂警告 -->
+          <!-- 衝堂硬阻擋警告 -->
           <div v-if="checkConflict(req.assignedCoach, req.preferredDate, req.timeSlot)" class="p-2 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 flex items-center space-x-1.5">
             <span>⚠️</span>
             <span><strong>衝堂警告：</strong> {{ req.assignedCoach }} 在該時段已有其他排定課程！</span>
@@ -165,11 +177,12 @@
           <!-- 撮合確認按鈕 -->
           <button 
             @click="confirmMatch(req)"
-            :disabled="!req.assignedCoach || checkConflict(req.assignedCoach, req.preferredDate, req.timeSlot)"
-            :class="(!req.assignedCoach || checkConflict(req.assignedCoach, req.preferredDate, req.timeSlot)) ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-purple-700 hover:bg-purple-800 text-white shadow-md'"
-            class="w-full py-2.5 rounded-lg text-xs font-bold transition"
+            :disabled="!req.assignedCoach || checkConflict(req.assignedCoach, req.preferredDate, req.timeSlot) || isProcessing"
+            :class="(!req.assignedCoach || checkConflict(req.assignedCoach, req.preferredDate, req.timeSlot) || isProcessing) ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-purple-700 hover:bg-purple-800 text-white shadow-md'"
+            class="w-full py-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1"
           >
-            確認媒合並排程 (產出 MAT-)
+            <span v-if="isProcessing" class="animate-spin mr-1">🔄</span>
+            <span>確認媒合並排程 (寫入試算表 MAT-)</span>
           </button>
         </div>
       </div>
@@ -198,7 +211,7 @@
           </div>
           <div class="space-y-1">
             <label class="font-bold text-slate-700">人數</label>
-            <input type="number" v-model="proxyForm.studentCount" min="1" max="6" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
+            <input type="number" v-model.number="proxyForm.studentCount" min="1" max="6" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
           </div>
         </div>
 
@@ -227,9 +240,11 @@
 
         <button 
           @click="submitProxyBooking" 
-          class="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition"
+          :disabled="isProcessing"
+          class="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition flex items-center justify-center space-x-1"
         >
-          建立代客預約需求 (寫入 REQ-)
+          <span v-if="isProcessing" class="animate-spin mr-1">🔄</span>
+          <span>建立代客預約需求 (寫入 REQ-)</span>
         </button>
       </div>
 
@@ -243,26 +258,25 @@
               :class="{
                 'bg-amber-100 text-amber-800': m.status === 'Confirmed',
                 'bg-emerald-100 text-emerald-800': m.status === 'Completed',
-                'bg-purple-100 text-purple-800': m.status === 'Settled'
+                'bg-purple-100 text-purple-800': m.status === 'Settled',
+                'bg-slate-100 text-slate-500 line-through': m.status && m.status.includes('Cancelled')
               }"
               class="font-bold px-2 py-0.5 rounded-full text-[10px]"
             >
-              {{ m.status === 'Confirmed' ? '排定中' : (m.status === 'Completed' ? '教練已簽到完課' : '💰 已核銷結清') }}
+              {{ m.status === 'Confirmed' ? '排定中' : (m.status === 'Completed' ? '教練已簽到完課' : (m.status === 'Settled' ? '💰 已核銷結清' : '已取消')) }}
             </span>
           </div>
           <p class="font-bold text-slate-900">{{ m.studentName }} ↔ {{ m.coachNames }}</p>
-          <p class="text-slate-500">📅 {{ m.date || m.lessonDate }} ({{ m.timeSlot || m.lessonTime }}) 📍 {{ m.venue }}</p>
+          <p class="text-slate-500">📅 {{ m.lessonDate }} ({{ m.lessonTime }}) 📍 {{ m.venue }}</p>
           
-          <div class="pt-1 flex space-x-2">
+          <div v-if="m.status === 'Confirmed'" class="pt-1 flex space-x-2">
             <button 
-              v-if="m.status === 'Confirmed'"
               @click="markCompletedAdmin(m)"
               class="flex-1 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded font-semibold border border-emerald-200"
             >
               代為標註完課
             </button>
             <button 
-              v-if="m.status === 'Confirmed'"
               @click="forceCancel(m)"
               class="py-1.5 px-3 bg-red-50 text-red-600 hover:bg-red-100 rounded font-semibold border border-red-200"
             >
@@ -282,28 +296,25 @@
 
       <!-- 待審核教練 -->
       <div class="space-y-3">
-        <h2 class="text-sm font-bold text-slate-800">待審核教練 ({{ pendingCoaches.length }})</h2>
+        <h2 class="text-sm font-bold text-slate-800">待審核教練名冊 ({{ pendingCoaches.length }})</h2>
         <div v-if="pendingCoaches.length === 0" class="py-4 text-center text-slate-400 text-xs bg-slate-50 rounded-xl">
           目前無待審核教練
         </div>
-        <div v-for="c in pendingCoaches" :key="c.uid" class="p-3 bg-white border border-slate-200 rounded-xl space-y-2 text-xs">
+        <div v-for="c in pendingCoaches" :key="c.coachUid" class="p-3 bg-white border border-slate-200 rounded-xl space-y-2 text-xs">
           <div class="flex justify-between items-start">
             <div>
-              <strong class="text-slate-900 text-sm">{{ c.displayName }}</strong>
-              <p class="text-[10px] text-slate-400 font-mono">UID: {{ formatUid(c.uid) }}</p>
+              <strong class="text-slate-900 text-sm">{{ c.realName || c.displayName }}</strong>
+              <p class="text-[10px] text-slate-400 font-mono">UID: {{ formatUid(c.coachUid) }}</p>
             </div>
             <span class="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full">審核中</span>
           </div>
           <div class="bg-slate-50 p-2 rounded text-[11px] text-slate-600 space-y-0.5">
-            <p>真實姓名：<input v-model="c.realName" placeholder="後台補登" class="bg-white border rounded px-1.5 py-0.5 text-[11px]"></p>
-            <p>DUPR 評分：<input v-model="c.dupr" placeholder="後台補登" class="bg-white border rounded px-1.5 py-0.5 text-[11px]"></p>
+            <p>聯絡電話：{{ c.phone || '未填' }}</p>
+            <p>DUPR 評分 / 資歷：{{ c.duprRating || '未填' }}</p>
           </div>
           <div class="flex space-x-2 pt-1">
             <button @click="approveCoach(c)" class="flex-1 py-1.5 bg-blue-600 text-white font-bold rounded text-xs hover:bg-blue-700">
-              核准成為教練
-            </button>
-            <button @click="rejectCoach(c)" class="py-1.5 px-3 bg-slate-100 text-slate-600 rounded text-xs hover:bg-slate-200">
-              婉拒
+              核准加入白名單
             </button>
           </div>
         </div>
@@ -315,11 +326,11 @@
         <div v-if="pendingAdmins.length === 0" class="py-4 text-center text-slate-400 text-xs bg-slate-50 rounded-xl">
           目前無新幹部申請
         </div>
-        <div v-for="a in pendingAdmins" :key="a.uid" class="p-3 bg-white border border-slate-200 rounded-xl space-y-2 text-xs">
+        <div v-for="a in pendingAdmins" :key="a.adminUid" class="p-3 bg-white border border-slate-200 rounded-xl space-y-2 text-xs">
           <div class="flex justify-between items-center">
             <div>
               <strong class="text-slate-900">{{ a.displayName }}</strong>
-              <p class="text-[10px] text-slate-400 font-mono">UID: {{ formatUid(a.uid) }}</p>
+              <p class="text-[10px] text-slate-400 font-mono">UID: {{ formatUid(a.adminUid) }}</p>
             </div>
             <button @click="approveAdmin(a)" class="py-1 px-3 bg-purple-700 text-white font-bold rounded text-xs hover:bg-purple-800">
               授權為幹部
@@ -336,7 +347,7 @@
         <p class="text-xs text-slate-500 mt-0.5">課堂結算傳票 (ACC-) ↔ 教練實領薪資作帳管理</p>
       </div>
 
-      <!-- 頂部次分頁切換 (核銷試算 vs 教練發薪統整表) -->
+      <!-- 頂部次分頁切換 -->
       <div class="flex p-1 bg-slate-200 rounded-xl text-xs font-bold">
         <button 
           @click="accountingSubView = 'slip'"
@@ -357,7 +368,6 @@
 
       <!-- 子視圖 1: 課堂收支核銷試算 -->
       <div v-if="accountingSubView === 'slip'" class="space-y-4">
-        <!-- 核心試算卡片 -->
         <div class="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 text-xs">
           <div class="flex justify-between items-center">
             <h2 class="font-bold text-slate-900 text-sm">課堂收支試算</h2>
@@ -376,22 +386,14 @@
             >
               <option value="">-- 請下拉選取已簽到之完課紀錄 --</option>
               <option v-for="m in completedMatches" :key="m.matId" :value="m.matId">
-                {{ m.matId }} | {{ m.studentName }} | {{ m.date }}
+                {{ m.matId }} | {{ m.studentName }} | {{ m.lessonDate }}
               </option>
             </select>
           </div>
 
-          <!-- 若無完課單時的提示 -->
-          <div v-if="completedMatches.length === 0" class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 space-y-1">
-            <p>⚠️ 目前無教練簽到完成的待核銷訂單。</p>
-            <button @click="loadMockCompleted" class="text-xs text-blue-700 underline font-semibold">
-              點此載入 1 筆測試完課紀錄
-            </button>
-          </div>
-
           <!-- 帶入之課程資訊摘要 -->
           <div v-if="currentSelectedMatch" class="p-2.5 bg-purple-50/70 border border-purple-200 rounded-lg space-y-1 text-slate-700">
-            <p>🏸 課程：<strong>{{ currentSelectedMatch.courseTitle }}</strong></p>
+            <p>🏸 課程：<strong>{{ currentSelectedMatch.courseType }}</strong></p>
             <p>👤 學員：{{ currentSelectedMatch.studentName }} ({{ currentSelectedMatch.venue }})</p>
             <p>👥 執教教練：<strong class="text-purple-800">{{ calcForm.coachNames }}</strong></p>
           </div>
@@ -449,31 +451,33 @@
           <!-- 確認送出核銷 -->
           <button 
             @click="generateAccountingSlip" 
-            :disabled="!selectedMatId"
-            :class="!selectedMatId ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-purple-700 hover:bg-purple-800 text-white shadow-md shadow-purple-700/20'"
-            class="w-full py-3 rounded-xl font-bold text-xs transition"
+            :disabled="!selectedMatId || isProcessing"
+            :class="(!selectedMatId || isProcessing) ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-purple-700 hover:bg-purple-800 text-white shadow-md shadow-purple-700/20'"
+            class="w-full py-3 rounded-xl font-bold text-xs transition flex items-center justify-center space-x-1"
           >
-            確認核銷並生成記帳傳票 (ACC-)
+            <span v-if="isProcessing" class="animate-spin mr-1">🔄</span>
+            <span>確認核銷並生成記帳傳票 (寫入試算表 ACC-)</span>
           </button>
         </div>
 
         <!-- 歷史核銷紀錄 -->
         <div class="space-y-2 pt-2">
-          <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider">最近核銷傳票 ({{ accountingLogs.length }})</h3>
-          <div v-for="acc in accountingLogs" :key="acc.accId" class="p-3 bg-white border border-slate-200 rounded-xl space-y-1 text-xs shadow-sm">
+          <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider">最近核銷傳票 ({{ rawAccounting.length }})</h3>
+          <div v-for="acc in rawAccounting" :key="acc.accId" class="p-3 bg-white border border-slate-200 rounded-xl space-y-1 text-xs shadow-sm">
             <div class="flex justify-between items-center">
               <span class="font-mono font-bold text-purple-700">{{ acc.accId }}</span>
-              <span class="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full">已結清傳票</span>
+              <span :class="acc.status === 'Settled' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'" class="text-[10px] font-bold px-2 py-0.5 rounded-full">
+                {{ acc.status === 'Settled' ? '已結清發放' : '待發放' }}
+              </span>
             </div>
-            <p class="text-slate-800">收入 NT${{ acc.revenue.toLocaleString() }} - 場地 NT${{ acc.venueCost.toLocaleString() }} = 酬勞 NT${{ acc.pool.toLocaleString() }}</p>
-            <p class="text-slate-500 text-[11px]">執教：{{ acc.coachNames }} (每人 NT${{ acc.perPay.toLocaleString() }})</p>
+            <p class="text-slate-800">收入 NT${{ Number(acc.actualRevenue).toLocaleString() }} - 場地 NT${{ Number(acc.venueCost).toLocaleString() }} = 酬勞 NT${{ Number(acc.netCoachPool).toLocaleString() }}</p>
+            <p class="text-slate-500 text-[11px]">執教：{{ acc.coachList }} (每人 NT${{ Number(acc.perCoachPay).toLocaleString() }})</p>
           </div>
         </div>
       </div>
 
-      <!-- 子視圖 2: 教練薪資發放作帳統整表 (核心亮點) -->
+      <!-- 子視圖 2: 教練薪資發放作帳統整表 -->
       <div v-if="accountingSubView === 'payroll'" class="space-y-4">
-        <!-- 頂部撥款總體概況 -->
         <div class="grid grid-cols-2 gap-3">
           <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
             <span class="text-[11px] text-amber-700 font-bold block">待發放薪資總額</span>
@@ -485,16 +489,14 @@
           </div>
         </div>
 
-        <!-- 教練統整名冊列表卡片 -->
         <div class="space-y-3">
           <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider">教練薪酬發放清冊</h2>
           
           <div 
             v-for="coach in coachPayrollSummaries" 
             :key="coach.name"
-            class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm transition"
+            class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm"
           >
-            <!-- 卡片頂部概況列 -->
             <div class="p-3.5 flex justify-between items-center bg-slate-50/50 border-b border-slate-100">
               <div class="flex items-center space-x-2.5">
                 <div class="w-8 h-8 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center font-bold text-xs">
@@ -506,7 +508,6 @@
                 </div>
               </div>
 
-              <!-- 待發金額狀態徽章 -->
               <div class="text-right">
                 <span v-if="coach.pendingAmount > 0" class="text-sm font-extrabold text-amber-600 block">
                   應發 NT$ {{ coach.pendingAmount.toLocaleString() }}
@@ -518,24 +519,22 @@
               </div>
             </div>
 
-            <!-- 課堂薪資明細 (逐筆發放作帳) -->
+            <!-- 課堂薪資明細 -->
             <div class="p-3 space-y-2 bg-white">
               <div 
                 v-for="item in coach.items" 
-                :key="item.payId"
+                :key="item.accId"
                 class="p-2.5 rounded-lg border border-slate-100 flex justify-between items-center text-xs"
                 :class="item.isPaid ? 'bg-slate-50/60' : 'bg-amber-50/30 border-amber-100'"
               >
                 <div>
                   <div class="flex items-center space-x-1.5">
                     <span class="font-mono font-bold text-[10px] text-purple-700">{{ item.accId }}</span>
-                    <strong class="text-slate-800">{{ item.courseTitle }}</strong>
+                    <strong class="text-slate-800">{{ item.lessonDate }}</strong>
                   </div>
-                  <p class="text-[11px] text-slate-500 mt-0.5">📅 {{ item.date }} | 應得分潤：<strong class="text-slate-900">NT$ {{ item.amount.toLocaleString() }}</strong></p>
-                  <p v-if="item.isPaid" class="text-[10px] text-emerald-600 font-medium">✓ 已於 {{ item.paidAt }} 發放</p>
+                  <p class="text-[11px] text-slate-500 mt-0.5">應得分潤：<strong class="text-slate-900">NT$ {{ Number(item.amount).toLocaleString() }}</strong></p>
                 </div>
 
-                <!-- 標記發放動作按鈕 -->
                 <div>
                   <button 
                     v-if="!item.isPaid"
@@ -544,25 +543,10 @@
                   >
                     標記已發放
                   </button>
-                  <button 
-                    v-else
-                    @click="revertPayout(item)"
-                    class="py-1 px-2 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded text-[11px] transition"
-                    title="點擊切換回未發放"
-                  >
-                    已領取完成
-                  </button>
+                  <span v-else class="text-xs text-emerald-600 font-bold px-2 py-1 bg-emerald-50 rounded">
+                    ✓ 已發放結清
+                  </span>
                 </div>
-              </div>
-
-              <!-- 一鍵結清按鈕 -->
-              <div v-if="coach.pendingAmount > 0" class="pt-1">
-                <button 
-                  @click="settleAllForCoach(coach)"
-                  class="w-full py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-xs font-bold transition"
-                >
-                  一鍵結清 {{ coach.name }} 所有待領款項 (NT$ {{ coach.pendingAmount.toLocaleString() }})
-                </button>
               </div>
             </div>
           </div>
@@ -600,8 +584,8 @@
     >
       <span class="text-lg">🛡️</span>
       <span class="text-[10px] mt-0.5">白名單審核</span>
-      <span v-if="pendingCoaches.length > 0" class="absolute top-1.5 right-4 w-4 h-4 bg-red-500 text-white rounded-full text-[9px] flex items-center justify-center font-bold">
-        {{ pendingCoaches.length }}
+      <span v-if="pendingCoaches.length > 0 || pendingAdmins.length > 0" class="absolute top-1.5 right-4 w-4 h-4 bg-red-500 text-white rounded-full text-[9px] flex items-center justify-center font-bold">
+        {{ pendingCoaches.length + pendingAdmins.length }}
       </span>
     </button>
     <button 
@@ -611,7 +595,6 @@
     >
       <span class="text-lg">💰</span>
       <span class="text-[10px] mt-0.5">均分記帳</span>
-      <!-- 動態紅點提醒：有待核銷完課單或待發放薪酬時提示 -->
       <span v-if="completedMatches.length > 0 || totalPendingPayout > 0" class="absolute top-1.5 right-4 w-4 h-4 bg-emerald-600 text-white rounded-full text-[9px] flex items-center justify-center font-bold">
         {{ completedMatches.length || '!' }}
       </span>
@@ -623,7 +606,9 @@
 <script>
   const { createApp, ref, reactive, computed, onMounted } = Vue;
 
-  const ADMIN_LIFF_ID = "";
+  // 專屬 Google Apps Script API 與 LIFF 識別碼
+  const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwe_Xh7I8iOMDBK278mvBIIeXaVa9B3qz8bl2RfdEFT0elPW9Ff7Vg3p2sHm3COUdfkmA/exec";
+  const ADMIN_LIFF_ID = "2011535009-IsC8f5XW";
 
   createApp({
     setup() {
@@ -633,69 +618,19 @@
       });
 
       const isAdminApproved = ref(true);
-      const currentTab = ref('accounting');
-      const accountingSubView = ref('payroll'); // 預設直接檢視教練發薪看板
+      const currentTab = ref('matching');
+      const accountingSubView = ref('slip');
+      const isProcessing = ref(false);
+      const isApplyingAdmin = ref(false);
 
-      const approvedCoaches = ref(['杜和益 教練', '王教練', '李教練']);
+      // Google 試算表即時資料庫鏡像
+      const rawRequests = ref([]);
+      const allMatches = ref([]);
+      const rawCoaches = ref([]);
+      const rawAdmins = ref([]);
+      const rawAccounting = ref([]);
 
-      // 待撮合學員需求池
-      const pendingRequests = ref([
-        {
-          reqId: 'REQ-20260910-001',
-          studentName: '陳大文',
-          courseType: '進階單堂精緻班',
-          studentCount: 2,
-          level: '2.5',
-          preferredDate: '2026-09-15',
-          timeSlot: '上午 (09:00-12:00)',
-          venuePreference: '宜蘭國民運動中心',
-          designatedCoach: '杜和益 教練',
-          notes: '加強反手截擊',
-          interestedCoaches: ['杜和益 教練'],
-          assignedCoach: '杜和益 教練',
-          assignedVenue: '宜蘭國民運動中心'
-        }
-      ]);
-
-      // 總課表清單
-      const allMatches = ref([
-        {
-          matId: 'MAT-20260915-001',
-          courseTitle: '進階精緻單堂課 (2人)',
-          studentName: '杜小明 等 2 人',
-          coachNames: '杜和益 教練',
-          date: '2026-09-15',
-          timeSlot: '09:00-10:00',
-          venue: '宜蘭國民運動中心',
-          expectedFee: 1400,
-          actualRevenue: 1400,
-          coachCount: 1,
-          status: 'Completed' // 待核銷
-        },
-        {
-          matId: 'MAT-20260918-002',
-          courseTitle: '初階團體培訓班 (4人成班)',
-          studentName: '林小姐等4人',
-          coachNames: '杜和益 教練、王教練',
-          date: '2026-09-18',
-          timeSlot: '18:00-19:00',
-          venue: '宜蘭運動公園風雨光電球場',
-          expectedFee: 6000,
-          actualRevenue: 6000,
-          coachCount: 2,
-          status: 'Confirmed'
-        }
-      ]);
-
-      // 白名單待審核
-      const pendingCoaches = ref([
-        { uid: 'U998877665544', displayName: '張大榮', realName: '', dupr: '3.65' }
-      ]);
-      const pendingAdmins = ref([
-        { uid: 'U112233445566', displayName: '陳幹事' }
-      ]);
-
-      // 長輩代客表單
+      // 代客提單表單模型
       const proxyForm = reactive({
         studentName: '',
         courseType: '初階團體培訓班',
@@ -705,15 +640,9 @@
         designatedCoach: ''
       });
 
-      // 篩選待核銷完課單
-      const completedMatches = computed(() => {
-        return allMatches.value.filter(m => m.status === 'Completed');
-      });
-
+      // 記帳試算表單
       const selectedMatId = ref('');
       const currentSelectedMatch = ref(null);
-
-      // 記帳試算表單
       const calcForm = reactive({
         revenue: 0,
         venueCost: 600,
@@ -721,20 +650,40 @@
         coachNames: ''
       });
 
-      function onSelectMatch() {
-        const found = allMatches.value.find(m => m.matId === selectedMatId.value);
-        if (found) {
-          currentSelectedMatch.value = found;
-          calcForm.revenue = found.actualRevenue || found.expectedFee || 1400;
-          calcForm.coachCount = found.coachCount || 1;
-          calcForm.coachNames = found.coachNames || '未登錄教練';
-        } else {
-          currentSelectedMatch.value = null;
-          calcForm.revenue = 0;
-          calcForm.coachNames = '';
-        }
-      }
+      // 取得核准之教練名稱清單
+      const approvedCoaches = computed(() => {
+        return rawCoaches.value
+          .filter(c => c.status === 'Approved')
+          .map(c => c.realName || c.displayName);
+      });
 
+      // 待撮合學員需求清單 (Pending / Interested)
+      const pendingRequests = computed(() => {
+        return rawRequests.value
+          .filter(r => r.status === 'Pending' || r.status === 'Interested')
+          .map(r => ({
+            ...r,
+            assignedCoach: r.assignedCoach || (r.designatedCoach && !r.designatedCoach.includes('不指定') ? r.designatedCoach : ''),
+            assignedVenue: r.assignedVenue || r.venuePreference || '宜蘭國民運動中心'
+          }));
+      });
+
+      // 待核銷完課排程 (Completed)
+      const completedMatches = computed(() => {
+        return allMatches.value.filter(m => m.status === 'Completed');
+      });
+
+      // 待審核教練
+      const pendingCoaches = computed(() => {
+        return rawCoaches.value.filter(c => c.status === 'Coach_Pending');
+      });
+
+      // 待審核幹部
+      const pendingAdmins = computed(() => {
+        return rawAdmins.value.filter(a => a.status === 'Pending');
+      });
+
+      // 均分薪資動態計算
       const netCoachPool = computed(() => {
         const pool = calcForm.revenue - calcForm.venueCost;
         return pool > 0 ? pool : 0;
@@ -744,194 +693,46 @@
         return calcForm.coachCount > 0 ? Math.round(netCoachPool.value / calcForm.coachCount) : 0;
       });
 
-      // 記帳流水傳票
-      const accountingLogs = ref([
-        {
-          accId: 'ACC-20260909-001',
-          revenue: 2800,
-          venueCost: 600,
-          pool: 2200,
-          coachNames: '杜和益 教練、王教練',
-          perPay: 1100
-        }
-      ]);
-
-      // 核心：教練薪資發放清冊資料庫 (Payout Records)
-      const payoutRecords = ref([
-        {
-          payId: 'PAY-001',
-          accId: 'ACC-20260909-001',
-          coachName: '杜和益 教練',
-          courseTitle: '進階單堂課 (2人)',
-          date: '2026-09-09',
-          amount: 1100,
-          isPaid: true, // 已發放
-          paidAt: '09-09 17:30'
-        },
-        {
-          payId: 'PAY-002',
-          accId: 'ACC-20260909-001',
-          coachName: '王教練',
-          courseTitle: '進階單堂課 (2人)',
-          date: '2026-09-09',
-          amount: 1100,
-          isPaid: false, // 待發放
-          paidAt: null
-        }
-      ]);
-
-      // 彙總教練發薪清單
+      // 教練發薪看板彙總
       const coachPayrollSummaries = computed(() => {
         const map = {};
-        // 先建立教練名冊基底
         approvedCoaches.value.forEach(name => {
-          map[name] = {
-            name: name,
-            pendingAmount: 0,
-            paidAmount: 0,
-            items: []
-          };
+          map[name] = { name: name, pendingAmount: 0, paidAmount: 0, items: [] };
         });
 
-        // 整理所有發薪細項
-        payoutRecords.value.forEach(p => {
-          if (!map[p.coachName]) {
-            map[p.coachName] = {
-              name: p.coachName,
-              pendingAmount: 0,
-              paidAmount: 0,
-              items: []
-            };
-          }
-          map[p.coachName].items.unshift(p);
-          if (p.isPaid) {
-            map[p.coachName].paidAmount += p.amount;
-          } else {
-            map[p.coachName].pendingAmount += p.amount;
-          }
+        rawAccounting.value.forEach(acc => {
+          const coaches = (acc.coachList || '').split(/[,、]/).map(s => s.trim()).filter(Boolean);
+          const payAmount = Number(acc.perCoachPay || 0);
+          const isPaid = acc.status === 'Settled';
+
+          coaches.forEach(cName => {
+            if (!map[cName]) {
+              map[cName] = { name: cName, pendingAmount: 0, paidAmount: 0, items: [] };
+            }
+            map[cName].items.unshift({
+              accId: acc.accId,
+              lessonDate: acc.lessonDate,
+              amount: payAmount,
+              isPaid: isPaid
+            });
+            if (isPaid) {
+              map[cName].paidAmount += payAmount;
+            } else {
+              map[cName].pendingAmount += payAmount;
+            }
+          });
         });
 
         return Object.values(map);
       });
 
-      // 待發與已發總計
       const totalPendingPayout = computed(() => {
-        return payoutRecords.value
-          .filter(p => !p.isPaid)
-          .reduce((sum, p) => sum + p.amount, 0);
+        return coachPayrollSummaries.value.reduce((sum, c) => sum + c.pendingAmount, 0);
       });
 
       const totalPaidPayout = computed(() => {
-        return payoutRecords.value
-          .filter(p => p.isPaid)
-          .reduce((sum, p) => sum + p.amount, 0);
+        return coachPayrollSummaries.value.reduce((sum, c) => sum + c.paidAmount, 0);
       });
-
-      // 標記單堂發放完成
-      function markPayoutCompleted(item) {
-        item.isPaid = true;
-        const now = new Date();
-        item.paidAt = `${now.getMonth() + 1}-${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
-        syncStorage();
-        alert(`已成功標記單號 ${item.payId} 為已發放領取！\n金額：NT$ ${item.amount}`);
-      }
-
-      // 復原發放狀態
-      function revertPayout(item) {
-        if (confirm(`確定要將單號 ${item.payId} 重置為「待發放」狀態嗎？`)) {
-          item.isPaid = false;
-          item.paidAt = null;
-          syncStorage();
-        }
-      }
-
-      // 一鍵結清教練全額薪資
-      function settleAllForCoach(coach) {
-        if (confirm(`確定要將 ${coach.name} 目前所有待發薪資 (NT$ ${coach.pendingAmount.toLocaleString()}) 全數結清發放嗎？`)) {
-          const now = new Date();
-          const stamp = `${now.getMonth() + 1}-${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
-          coach.items.forEach(i => {
-            if (!i.isPaid) {
-              i.isPaid = true;
-              i.paidAt = stamp;
-            }
-          });
-          syncStorage();
-          alert(`已完成 ${coach.name} 全額薪資發放結清作業！`);
-        }
-      }
-
-      // 產生 ACC 傳票並自動分拆建立發薪紀錄
-      function generateAccountingSlip() {
-        if (!selectedMatId.value || !currentSelectedMatch.value) {
-          alert('請先下拉選取待核銷的完課單號！');
-          return;
-        }
-
-        const newAccId = `ACC-20260910-${Math.floor(100 + Math.random() * 900)}`;
-        
-        // 1. 新增傳票
-        accountingLogs.value.unshift({
-          accId: newAccId,
-          matId: selectedMatId.value,
-          revenue: calcForm.revenue,
-          venueCost: calcForm.venueCost,
-          pool: netCoachPool.value,
-          coachNames: calcForm.coachNames,
-          perPay: perCoachPay.value
-        });
-
-        // 2. 自動將教練款項拆分為待發薪項目
-        const rawCoaches = calcForm.coachNames.split(/[,、]/).map(s => s.trim()).filter(Boolean);
-        const coachesToPay = rawCoaches.length > 0 ? rawCoaches : ['杜和益 教練'];
-
-        coachesToPay.forEach((cName, idx) => {
-          payoutRecords.value.unshift({
-            payId: `PAY-${Date.now().toString().slice(-4)}-${idx + 1}`,
-            accId: newAccId,
-            coachName: cName,
-            courseTitle: currentSelectedMatch.value.courseTitle,
-            date: currentSelectedMatch.value.date || getTomorrowDate(),
-            amount: perCoachPay.value,
-            isPaid: false, // 剛核算完，預設為待發放
-            paidAt: null
-          });
-        });
-
-        // 3. 課堂狀態改為已核銷 Settled
-        currentSelectedMatch.value.status = 'Settled';
-        syncStorage();
-
-        alert(`核銷成功！\n生成傳票單號：${newAccId}\n已自動建立 ${coachesToPay.length} 筆教練待發薪資項目，可切換至「教練發薪統整表」查閱發放！`);
-
-        // 切換到發薪看板檢視
-        accountingSubView.value = 'payroll';
-        selectedMatId.value = '';
-        currentSelectedMatch.value = null;
-        calcForm.revenue = 0;
-      }
-
-      function loadMockCompleted() {
-        allMatches.value.unshift({
-          matId: `MAT-20260910-${Math.floor(100 + Math.random() * 900)}`,
-          courseTitle: '進階單堂課 (2人)',
-          studentName: '陳大文 等 2 人',
-          coachNames: '杜和益 教練、王教練',
-          date: '2026-09-10',
-          timeSlot: '14:00-15:00',
-          venue: '宜蘭國民運動中心',
-          expectedFee: 1400,
-          actualRevenue: 1400,
-          coachCount: 2,
-          status: 'Completed'
-        });
-        syncStorage();
-      }
-
-      function syncStorage() {
-        localStorage.setItem('pickle_matches', JSON.stringify(allMatches.value));
-        localStorage.setItem('pickle_payouts', JSON.stringify(payoutRecords.value));
-      }
 
       function formatUid(uid) {
         return uid ? uid.substring(0, 8) + '...' + uid.slice(-4) : '';
@@ -943,95 +744,317 @@
         return d.toISOString().split('T')[0];
       }
 
+      function toggleAdminStatus() {
+        isAdminApproved.value = !isAdminApproved.value;
+      }
+
+      function parseInterested(raw) {
+        if (!raw) return [];
+        if (Array.isArray(raw)) return raw;
+        try {
+          return JSON.parse(raw);
+        } catch (e) {
+          return [];
+        }
+      }
+
+      // 衝堂檢核硬約束
       function checkConflict(coachName, date, timeSlot) {
         if (!coachName) return false;
         return allMatches.value.some(m => 
           m.coachNames && m.coachNames.includes(coachName) && 
-          m.date === date && 
-          m.timeSlot === timeSlot &&
+          m.lessonDate === date && 
+          m.lessonTime === timeSlot &&
           m.status === 'Confirmed'
         );
       }
 
-      function confirmMatch(req) {
-        const newMatId = `MAT-20260910-${Math.floor(100 + Math.random() * 900)}`;
-        allMatches.value.unshift({
-          matId: newMatId,
-          courseTitle: req.courseType,
-          studentName: req.studentName,
-          coachNames: req.assignedCoach,
-          date: req.preferredDate,
-          timeSlot: req.timeSlot,
-          venue: req.assignedVenue,
-          expectedFee: req.courseType.includes('初階') ? 6000 : 1400,
-          actualRevenue: req.courseType.includes('初階') ? 6000 : 1400,
-          coachCount: 1,
-          status: 'Confirmed'
-        });
-        pendingRequests.value = pendingRequests.value.filter(r => r.reqId !== req.reqId);
-        syncStorage();
-        alert(`撮合排程成功！生成訂單單號：${newMatId}`);
+      // 下拉選中完課單號
+      function onSelectMatch() {
+        const found = allMatches.value.find(m => m.matId === selectedMatId.value);
+        if (found) {
+          currentSelectedMatch.value = found;
+          calcForm.revenue = Number(found.expectedFee) || 1400;
+          calcForm.coachNames = found.coachNames || '';
+          const count = (found.coachNames || '').split(/[,、]/).filter(Boolean).length;
+          calcForm.coachCount = count > 0 ? count : 1;
+        } else {
+          currentSelectedMatch.value = null;
+          calcForm.revenue = 0;
+          calcForm.coachNames = '';
+        }
       }
 
-      function submitProxyBooking() {
+      // 從後端 GAS API 載入全盤管理資料
+      async function loadAdminData() {
+        try {
+          const res = await fetch(`${GAS_API_URL}?action=getAdminData&uid=${adminProfile.userId}`);
+          const data = await res.json();
+          if (data.status === 'success') {
+            isAdminApproved.value = true;
+            rawRequests.value = data.requests || [];
+            allMatches.value = data.matches || [];
+            rawCoaches.value = data.coaches || [];
+            rawAdmins.value = data.admins || [];
+            rawAccounting.value = data.accounting || [];
+          } else if (data.status === 'unauthorized') {
+            isAdminApproved.value = false;
+          }
+        } catch (err) {
+          console.error('後台資料同步失敗:', err);
+        }
+      }
+
+      // 確認撮合 (寫入 Matches_MAT)
+      async function confirmMatch(req) {
+        isProcessing.value = true;
+        try {
+          const payload = {
+            action: 'confirmMatch',
+            reqId: req.reqId,
+            lessonDate: req.preferredDate,
+            lessonTime: req.timeSlot,
+            venue: req.assignedVenue,
+            studentUid: req.studentUid,
+            studentName: req.studentName,
+            coachNames: req.assignedCoach,
+            courseType: req.courseType,
+            expectedFee: req.courseType.includes('初階') ? 6000 : 1400,
+            managedBy: adminProfile.name
+          };
+          const res = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
+          });
+          const result = await res.json();
+          if (result.status === 'success') {
+            alert(`撮合排程成功！生成正式排程單號：${result.matId}`);
+            await loadAdminData();
+          } else {
+            alert('撮合失敗：' + result.message);
+          }
+        } catch (err) {
+          alert('撮合異常：' + err.toString());
+        } finally {
+          isProcessing.value = false;
+        }
+      }
+
+      // 長輩代客提單
+      async function submitProxyBooking() {
         if (!proxyForm.studentName) {
           alert('請輸入學員稱呼！');
           return;
         }
-        const newReqId = `REQ-20260910-${Math.floor(100 + Math.random() * 900)}`;
-        pendingRequests.value.unshift({
-          reqId: newReqId,
-          studentName: proxyForm.studentName + ' (幹部代約)',
-          courseType: proxyForm.courseType,
-          studentCount: proxyForm.studentCount,
-          level: '待評估',
-          preferredDate: proxyForm.date,
-          timeSlot: proxyForm.timeSlot,
-          venuePreference: '由委員會協調',
-          designatedCoach: proxyForm.designatedCoach,
-          notes: '口頭受託預約',
-          interestedCoaches: [],
-          assignedCoach: proxyForm.designatedCoach || '',
-          assignedVenue: '宜蘭國民運動中心'
-        });
-        alert(`已建立代客需求單號：${newReqId}`);
-        proxyForm.studentName = '';
-        currentTab.value = 'matching';
-      }
-
-      function markCompletedAdmin(match) {
-        match.status = 'Completed';
-        match.actualRevenue = match.expectedFee || 1400;
-        syncStorage();
-        alert(`單號 ${match.matId} 已標記完課！請至均分記帳頁核銷。`);
-        currentTab.value = 'accounting';
-        accountingSubView.value = 'slip';
-        selectedMatId.value = match.matId;
-        onSelectMatch();
-      }
-
-      function forceCancel(match) {
-        const reason = prompt('請輸入強制取消原因（如：宜蘭強降雨球場濕滑、學員突發事故）：');
-        if (reason) {
-          match.status = 'Cancelled_Admin';
-          syncStorage();
-          alert(`單號 ${match.matId} 已強制取消！原因：${reason}`);
+        isProcessing.value = true;
+        try {
+          const payload = {
+            action: 'adminProxyRequest',
+            studentUid: 'PROXY_' + Date.now().toString().slice(-6),
+            studentName: proxyForm.studentName + ' (幹部代約)',
+            courseType: proxyForm.courseType,
+            preferredDate: proxyForm.date,
+            timeSlot: proxyForm.timeSlot,
+            level: '待評估',
+            studentCount: proxyForm.studentCount,
+            designatedCoach: proxyForm.designatedCoach || '不指定(由委員會推薦)',
+            venuePreference: '宜蘭國民運動中心',
+            notes: '由委員會代客口頭提單',
+            proxyAdminUid: adminProfile.userId
+          };
+          const res = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
+          });
+          const result = await res.json();
+          if (result.status === 'success') {
+            alert(`代客需求單建立成功！單號：${result.reqId}`);
+            proxyForm.studentName = '';
+            currentTab.value = 'matching';
+            await loadAdminData();
+          } else {
+            alert('建立失敗：' + result.message);
+          }
+        } catch (err) {
+          alert('連線失敗：' + err.toString());
+        } finally {
+          isProcessing.value = false;
         }
       }
 
-      function approveCoach(coach) {
-        approvedCoaches.value.push(coach.displayName);
-        pendingCoaches.value = pendingCoaches.value.filter(c => c.uid !== coach.uid);
-        alert(`已核准 ${coach.displayName} 成為授課教練！`);
+      // 幹部代為標註完課
+      async function markCompletedAdmin(match) {
+        try {
+          const res = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'coachCompleteLesson',
+              matId: match.matId,
+              actualRevenue: Number(match.expectedFee) || 1400,
+              coachNames: match.coachNames
+            })
+          });
+          const result = await res.json();
+          if (result.status === 'success') {
+            alert(`單號 ${match.matId} 已標記完課！`);
+            await loadAdminData();
+            currentTab.value = 'accounting';
+            accountingSubView.value = 'slip';
+            selectedMatId.value = match.matId;
+            onSelectMatch();
+          }
+        } catch (err) {
+          alert('標註異常：' + err.toString());
+        }
       }
 
-      function rejectCoach(coach) {
-        pendingCoaches.value = pendingCoaches.value.filter(c => c.uid !== coach.uid);
+      // 幹部代客強制取消
+      async function forceCancel(match) {
+        const reason = prompt('請輸入強制取消原因（如：天候暴雨球場濕滑、學員突發事故）：');
+        if (!reason) return;
+        try {
+          const res = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'adminCancelBooking',
+              id: match.matId,
+              idType: 'MAT'
+            })
+          });
+          const result = await res.json();
+          if (result.status === 'success') {
+            alert(`排程已代客取消！`);
+            await loadAdminData();
+          }
+        } catch (err) {
+          alert('取消異常：' + err.toString());
+        }
       }
 
-      function approveAdmin(admin) {
-        pendingAdmins.value = pendingAdmins.value.filter(a => a.uid !== admin.uid);
-        alert(`已核准 ${admin.displayName} 成為委員會幹部！`);
+      // 白名單核准教練
+      async function approveCoach(coach) {
+        try {
+          const res = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'approveCoach',
+              coachUid: coach.coachUid,
+              approvedBy: adminProfile.name
+            })
+          });
+          const result = await res.json();
+          alert(result.message || '教練已成功加入白名單！');
+          await loadAdminData();
+        } catch (err) {
+          alert('審核異常：' + err.toString());
+        }
+      }
+
+      // 白名單核准幹部
+      async function approveAdmin(admin) {
+        try {
+          const res = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'approveAdmin',
+              adminUid: admin.adminUid,
+              approvedBy: adminProfile.name
+            })
+          });
+          const result = await res.json();
+          alert(result.message || '已成功授權為委員會幹部！');
+          await loadAdminData();
+        } catch (err) {
+          alert('審核異常：' + err.toString());
+        }
+      }
+
+      // 生成 ACC- 記帳核銷傳票
+      async function generateAccountingSlip() {
+        if (!selectedMatId.value || !currentSelectedMatch.value) {
+          alert('請先下拉選取待核銷完課單號！');
+          return;
+        }
+        isProcessing.value = true;
+        try {
+          const payload = {
+            action: 'settleLessonAccounting',
+            matId: selectedMatId.value,
+            lessonDate: currentSelectedMatch.value.lessonDate || getTomorrowDate(),
+            actualRevenue: calcForm.revenue,
+            venueCost: calcForm.venueCost,
+            coachCount: calcForm.coachCount,
+            coachList: calcForm.coachNames,
+            settledBy: adminProfile.name
+          };
+          const res = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
+          });
+          const result = await res.json();
+          if (result.status === 'success') {
+            alert(`核銷傳票生成成功！單號：${result.accId}\n每位教練實得：NT$ ${result.perCoachPay}`);
+            selectedMatId.value = '';
+            currentSelectedMatch.value = null;
+            await loadAdminData();
+            accountingSubView.value = 'payroll';
+          } else {
+            alert('核銷失敗：' + result.message);
+          }
+        } catch (err) {
+          alert('連線異常：' + err.toString());
+        } finally {
+          isProcessing.value = false;
+        }
+      }
+
+      // 標記教練發薪結清
+      async function markPayoutCompleted(item) {
+        try {
+          const res = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'updatePayrollStatus',
+              accId: item.accId
+            })
+          });
+          const result = await res.json();
+          alert(result.message || '該筆薪酬已標記發放結清！');
+          await loadAdminData();
+        } catch (err) {
+          alert('操作異常：' + err.toString());
+        }
+      }
+
+      // 線上申請幹部
+      async function applyForAdmin() {
+        isApplyingAdmin.value = true;
+        try {
+          const res = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'applyAdmin',
+              adminUid: adminProfile.userId,
+              realName: adminProfile.name,
+              displayName: adminProfile.name
+            })
+          });
+          const result = await res.json();
+          alert(result.message || '幹部申請已送出！');
+        } catch (err) {
+          alert('連線異常：' + err.toString());
+        } finally {
+          isApplyingAdmin.value = false;
+        }
       }
 
       function copyUid() {
@@ -1040,37 +1063,24 @@
         });
       }
 
-      function applyForAdmin() {
-        alert('申請已提交！請請創世管理員杜和益於後台核准。');
-        isAdminApproved.value = true;
-      }
-
       onMounted(async () => {
-        const savedUid = localStorage.getItem('pickle_uid');
-        const savedName = localStorage.getItem('pickle_name');
-        if (savedUid) adminProfile.userId = savedUid;
-        if (savedName) adminProfile.name = savedName;
-
-        const savedMatches = localStorage.getItem('pickle_matches');
-        if (savedMatches) {
+        if (ADMIN_LIFF_ID && typeof liff !== 'undefined') {
           try {
-            allMatches.value = JSON.parse(savedMatches);
-          } catch(e) {}
-        } else {
-          syncStorage();
+            await liff.init({ liffId: ADMIN_LIFF_ID });
+            if (!liff.isLoggedIn()) {
+              liff.login();
+              return;
+            }
+            const profile = await liff.getProfile();
+            adminProfile.userId = profile.userId;
+            adminProfile.name = profile.displayName + ' (幹部)';
+          } catch (e) {
+            console.warn('委員會 LIFF 初始化失敗，採用預設創世幹部身分:', e);
+          }
         }
 
-        const savedPayouts = localStorage.getItem('pickle_payouts');
-        if (savedPayouts) {
-          try {
-            payoutRecords.value = JSON.parse(savedPayouts);
-          } catch(e) {}
-        }
-
-        if (completedMatches.value.length > 0) {
-          selectedMatId.value = completedMatches.value[0].matId;
-          onSelectMatch();
-        }
+        // 從 Google 試算表載入最新資料
+        await loadAdminData();
       });
 
       return {
@@ -1078,40 +1088,40 @@
         isAdminApproved,
         currentTab,
         accountingSubView,
+        isProcessing,
+        isApplyingAdmin,
+        proxyForm,
+        calcForm,
+        selectedMatId,
+        currentSelectedMatch,
         approvedCoaches,
         pendingRequests,
         allMatches,
         completedMatches,
-        selectedMatId,
-        currentSelectedMatch,
         pendingCoaches,
         pendingAdmins,
-        proxyForm,
-        calcForm,
+        rawAccounting,
         netCoachPool,
         perCoachPay,
-        accountingLogs,
-        payoutRecords,
         coachPayrollSummaries,
         totalPendingPayout,
         totalPaidPayout,
         formatUid,
+        toggleAdminStatus,
+        parseInterested,
         checkConflict,
+        onSelectMatch,
+        loadAdminData,
         confirmMatch,
         submitProxyBooking,
         markCompletedAdmin,
         forceCancel,
         approveCoach,
-        rejectCoach,
         approveAdmin,
-        onSelectMatch,
         generateAccountingSlip,
-        loadMockCompleted,
         markPayoutCompleted,
-        revertPayout,
-        settleAllForCoach,
-        copyUid,
-        applyForAdmin
+        applyForAdmin,
+        copyUid
       };
     }
   }).mount('#app');
