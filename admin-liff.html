@@ -287,14 +287,14 @@
       </div>
     </section>
 
-    <!-- Tab 3: 白名單審核中心 -->
+    <!-- Tab 3: 白名單審核中心 (含核准與拒絕機制) -->
     <section v-if="currentTab === 'whitelist'" class="space-y-5">
       <div class="border-b pb-3">
         <h1 class="text-xl font-bold text-slate-900">白名單與權限審核</h1>
         <p class="text-xs text-slate-500 mt-0.5">免手打 UID 一鍵審核教練與幹部資格</p>
       </div>
 
-      <!-- 待審核教練 -->
+      <!-- 待審核教練 (支援核准與拒絕) -->
       <div class="space-y-3">
         <h2 class="text-sm font-bold text-slate-800">待審核教練名冊 ({{ pendingCoaches.length }})</h2>
         <div v-if="pendingCoaches.length === 0" class="py-4 text-center text-slate-400 text-xs bg-slate-50 rounded-xl">
@@ -313,8 +313,11 @@
             <p>DUPR 評分 / 資歷：{{ c.duprRating || '未填' }}</p>
           </div>
           <div class="flex space-x-2 pt-1">
-            <button @click="approveCoach(c)" class="flex-1 py-1.5 bg-blue-600 text-white font-bold rounded text-xs hover:bg-blue-700">
-              核准加入白名單
+            <button @click="approveCoach(c)" class="flex-1 py-1.5 bg-blue-600 text-white font-bold rounded text-xs hover:bg-blue-700 transition">
+              ✓ 核准加入
+            </button>
+            <button @click="rejectCoach(c)" class="py-1.5 px-3 bg-red-50 text-red-600 hover:bg-red-100 font-bold rounded text-xs border border-red-200 transition">
+              ✕ 拒絕申請
             </button>
           </div>
         </div>
@@ -347,7 +350,6 @@
         <p class="text-xs text-slate-500 mt-0.5">課堂結算傳票 (ACC-) ↔ 教練實領薪資作帳管理</p>
       </div>
 
-      <!-- 頂部次分頁切換 -->
       <div class="flex p-1 bg-slate-200 rounded-xl text-xs font-bold">
         <button 
           @click="accountingSubView = 'slip'"
@@ -376,7 +378,6 @@
             </span>
           </div>
 
-          <!-- 選擇完課訂單下拉選單 -->
           <div class="space-y-1">
             <label class="font-bold text-slate-700 block">選擇待核銷完課訂單 (MAT-) <span class="text-red-500">*</span></label>
             <select 
@@ -391,14 +392,12 @@
             </select>
           </div>
 
-          <!-- 帶入之課程資訊摘要 -->
           <div v-if="currentSelectedMatch" class="p-2.5 bg-purple-50/70 border border-purple-200 rounded-lg space-y-1 text-slate-700">
             <p>🏸 課程：<strong>{{ currentSelectedMatch.courseType }}</strong></p>
             <p>👤 學員：{{ currentSelectedMatch.studentName }} ({{ currentSelectedMatch.venue }})</p>
             <p>👥 執教教練：<strong class="text-purple-800">{{ calcForm.coachNames }}</strong></p>
           </div>
 
-          <!-- 金額試算輸入列 -->
           <div class="grid grid-cols-2 gap-2">
             <div class="space-y-1">
               <label class="font-bold text-slate-700">實收學費總額 (NT$)</label>
@@ -419,7 +418,6 @@
             </div>
           </div>
 
-          <!-- 出勤教練人數按鈕 -->
           <div class="space-y-1">
             <label class="font-bold text-slate-700">出勤教練人數</label>
             <div class="flex space-x-2">
@@ -436,7 +434,6 @@
             </div>
           </div>
 
-          <!-- 即時核算結果框 -->
           <div class="bg-white p-3 rounded-lg border border-purple-200 space-y-1.5 text-xs">
             <div class="flex justify-between items-center">
               <span class="text-slate-500">教練分配總酬勞：</span>
@@ -448,7 +445,6 @@
             </div>
           </div>
 
-          <!-- 確認送出核銷 -->
           <button 
             @click="generateAccountingSlip" 
             :disabled="!selectedMatId || isProcessing"
@@ -460,7 +456,6 @@
           </button>
         </div>
 
-        <!-- 歷史核銷紀錄 -->
         <div class="space-y-2 pt-2">
           <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider">最近核銷傳票 ({{ rawAccounting.length }})</h3>
           <div v-for="acc in rawAccounting" :key="acc.accId" class="p-3 bg-white border border-slate-200 rounded-xl space-y-1 text-xs shadow-sm">
@@ -606,15 +601,14 @@
 <script>
   const { createApp, ref, reactive, computed, onMounted } = Vue;
 
-  // 專屬 Google Apps Script API 與 LIFF 識別碼
   const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwe_Xh7I8iOMDBK278mvBIIeXaVa9B3qz8bl2RfdEFT0elPW9Ff7Vg3p2sHm3COUdfkmA/exec";
   const ADMIN_LIFF_ID = "2011535009-IsC8f5XW";
 
   createApp({
     setup() {
       const adminProfile = reactive({
-        userId: 'Ud471b1a7217b649b3599b54700d352c9',
-        name: '杜和益'
+        userId: 'Ud471b1a7217b649b3599b54700d352c9', // ⭐ 您的真實創世 UID
+        name: '杜和益 (創世幹部)'
       });
 
       const isAdminApproved = ref(true);
@@ -623,14 +617,12 @@
       const isProcessing = ref(false);
       const isApplyingAdmin = ref(false);
 
-      // Google 試算表即時資料庫鏡像
       const rawRequests = ref([]);
       const allMatches = ref([]);
       const rawCoaches = ref([]);
       const rawAdmins = ref([]);
       const rawAccounting = ref([]);
 
-      // 代客提單表單模型
       const proxyForm = reactive({
         studentName: '',
         courseType: '初階團體培訓班',
@@ -640,7 +632,6 @@
         designatedCoach: ''
       });
 
-      // 記帳試算表單
       const selectedMatId = ref('');
       const currentSelectedMatch = ref(null);
       const calcForm = reactive({
@@ -650,14 +641,12 @@
         coachNames: ''
       });
 
-      // 取得核准之教練名稱清單
       const approvedCoaches = computed(() => {
         return rawCoaches.value
           .filter(c => c.status === 'Approved')
-          .map(c => c.realName || c.displayName);
+          .map(c => c.realName ? (c.realName.includes('教練') ? c.realName : c.realName + ' 教練') : (c.displayName || '教練'));
       });
 
-      // 待撮合學員需求清單 (Pending / Interested)
       const pendingRequests = computed(() => {
         return rawRequests.value
           .filter(r => r.status === 'Pending' || r.status === 'Interested')
@@ -668,22 +657,19 @@
           }));
       });
 
-      // 待核銷完課排程 (Completed)
       const completedMatches = computed(() => {
         return allMatches.value.filter(m => m.status === 'Completed');
       });
 
-      // 待審核教練
+      // 待審核教練名冊 (狀態為 Coach_Pending)
       const pendingCoaches = computed(() => {
         return rawCoaches.value.filter(c => c.status === 'Coach_Pending');
       });
 
-      // 待審核幹部
       const pendingAdmins = computed(() => {
         return rawAdmins.value.filter(a => a.status === 'Pending');
       });
 
-      // 均分薪資動態計算
       const netCoachPool = computed(() => {
         const pool = calcForm.revenue - calcForm.venueCost;
         return pool > 0 ? pool : 0;
@@ -693,7 +679,6 @@
         return calcForm.coachCount > 0 ? Math.round(netCoachPool.value / calcForm.coachCount) : 0;
       });
 
-      // 教練發薪看板彙總
       const coachPayrollSummaries = computed(() => {
         const map = {};
         approvedCoaches.value.forEach(name => {
@@ -758,7 +743,6 @@
         }
       }
 
-      // 衝堂檢核硬約束
       function checkConflict(coachName, date, timeSlot) {
         if (!coachName) return false;
         return allMatches.value.some(m => 
@@ -769,7 +753,6 @@
         );
       }
 
-      // 下拉選中完課單號
       function onSelectMatch() {
         const found = allMatches.value.find(m => m.matId === selectedMatId.value);
         if (found) {
@@ -785,7 +768,6 @@
         }
       }
 
-      // 從後端 GAS API 載入全盤管理資料
       async function loadAdminData() {
         try {
           const res = await fetch(`${GAS_API_URL}?action=getAdminData&uid=${adminProfile.userId}`);
@@ -805,7 +787,6 @@
         }
       }
 
-      // 確認撮合 (寫入 Matches_MAT)
       async function confirmMatch(req) {
         isProcessing.value = true;
         try {
@@ -841,7 +822,6 @@
         }
       }
 
-      // 長輩代客提單
       async function submitProxyBooking() {
         if (!proxyForm.studentName) {
           alert('請輸入學員稱呼！');
@@ -884,7 +864,6 @@
         }
       }
 
-      // 幹部代為標註完課
       async function markCompletedAdmin(match) {
         try {
           const res = await fetch(GAS_API_URL, {
@@ -911,7 +890,6 @@
         }
       }
 
-      // 幹部代客強制取消
       async function forceCancel(match) {
         const reason = prompt('請輸入強制取消原因（如：天候暴雨球場濕滑、學員突發事故）：');
         if (!reason) return;
@@ -935,7 +913,7 @@
         }
       }
 
-      // 白名單核准教練
+      // 核准教練加入白名單
       async function approveCoach(coach) {
         try {
           const res = await fetch(GAS_API_URL, {
@@ -955,7 +933,29 @@
         }
       }
 
-      // 白名單核准幹部
+      // ⭐ 拒絕教練申請 (防誤觸或不合規)
+      async function rejectCoach(coach) {
+        const name = coach.realName || coach.displayName;
+        if (!confirm(`確定要拒絕「${name}」的教練資格申請嗎？\n拒絕後此申請將自審核名冊移除。`)) return;
+
+        try {
+          const res = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'rejectCoach',
+              coachUid: coach.coachUid,
+              rejectedBy: adminProfile.name
+            })
+          });
+          const result = await res.json();
+          alert(result.message || '已拒絕該教練申請！');
+          await loadAdminData();
+        } catch (err) {
+          alert('審核異常：' + err.toString());
+        }
+      }
+
       async function approveAdmin(admin) {
         try {
           const res = await fetch(GAS_API_URL, {
@@ -975,7 +975,6 @@
         }
       }
 
-      // 生成 ACC- 記帳核銷傳票
       async function generateAccountingSlip() {
         if (!selectedMatId.value || !currentSelectedMatch.value) {
           alert('請先下拉選取待核銷完課單號！');
@@ -1015,7 +1014,6 @@
         }
       }
 
-      // 標記教練發薪結清
       async function markPayoutCompleted(item) {
         try {
           const res = await fetch(GAS_API_URL, {
@@ -1034,7 +1032,6 @@
         }
       }
 
-      // 線上申請幹部
       async function applyForAdmin() {
         isApplyingAdmin.value = true;
         try {
@@ -1075,11 +1072,10 @@
             adminProfile.userId = profile.userId;
             adminProfile.name = profile.displayName + ' (幹部)';
           } catch (e) {
-            console.warn('委員會 LIFF 初始化失敗，採用預設創世幹部身分:', e);
+            console.warn('委員會 LIFF 初始化失敗，採用預設身分:', e);
           }
         }
 
-        // 從 Google 試算表載入最新資料
         await loadAdminData();
       });
 
@@ -1117,6 +1113,7 @@
         markCompletedAdmin,
         forceCancel,
         approveCoach,
+        rejectCoach,
         approveAdmin,
         generateAccountingSlip,
         markPayoutCompleted,
