@@ -4,13 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>匹克球課程預約 - 學員端</title>
-  <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Vue 3 CDN -->
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  <!-- LINE LIFF SDK -->
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <!-- Google Fonts: Inter & Noto Sans TC -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -24,11 +20,10 @@
 
 <div id="app" class="max-w-md mx-auto min-h-screen bg-white shadow-xl flex flex-col relative">
 
-  <!-- 頂部：狀態列與回首頁捷徑 -->
+  <!-- 頂部狀態列 -->
   <header class="bg-emerald-700 text-white px-4 py-3 sticky top-0 z-30 shadow-md">
     <div class="flex items-center justify-between">
       <div class="flex items-center space-x-2.5">
-        <!-- 回首頁按鈕 -->
         <a href="index.html" class="w-8 h-8 rounded-lg bg-emerald-800/80 hover:bg-emerald-600 flex items-center justify-center text-sm font-bold border border-emerald-500/50 transition" title="回首頁">
           🏠
         </a>
@@ -43,33 +38,31 @@
           <p class="text-[11px] text-emerald-100 font-mono">UID: {{ formatUid(userProfile.userId) }}</p>
         </div>
       </div>
-      <button @click="loadStudentData" class="text-xs bg-emerald-800/80 hover:bg-emerald-900 px-2 py-1.5 rounded-lg text-emerald-100 border border-emerald-600 transition flex items-center space-x-1">
+      <button @click="loadStudentData" class="text-xs bg-emerald-800/80 hover:bg-emerald-900 px-2.5 py-1.5 rounded-lg text-emerald-100 border border-emerald-600 transition flex items-center space-x-1">
         <span>🔄 重新整理</span>
       </button>
     </div>
   </header>
 
-  <!-- 2 筆進行中預約上限防呆警告橫幅 -->
+  <!-- 2 筆上限警告 -->
   <div v-if="activeBookingsCount >= 2" class="bg-amber-50 border-b border-amber-200 px-4 py-2.5 flex items-center space-x-2 text-amber-800 text-xs">
     <span class="text-base">⚠️</span>
     <span>您目前已有 <strong>2 筆進行中</strong> 預約，已達上限，完成上課後方可再度提單。</span>
   </div>
 
-  <!-- 主要內容區 -->
   <main class="flex-1 p-4 overflow-y-auto">
 
-    <!-- Tab 1: 我要提單 (填需求) -->
+    <!-- Tab 1: 我要提單 -->
     <section v-if="currentTab === 'request'" class="space-y-5">
       <div class="border-b pb-3">
         <h1 class="text-xl font-bold text-slate-900">提出上課需求</h1>
         <p class="text-xs text-slate-500 mt-0.5">送出後委員會將在試算表後台為您配對教練與場地</p>
       </div>
 
-      <!-- 課程班型選擇器 -->
+      <!-- 班型選擇 -->
       <div class="space-y-2">
         <label class="text-sm font-bold text-slate-700">選擇課程班型 <span class="text-red-500">*</span></label>
         <div class="grid grid-cols-1 gap-3">
-          <!-- 初階班 -->
           <div 
             @click="form.courseType = 'basic'; form.studentCount = 4"
             :class="form.courseType === 'basic' ? 'border-emerald-600 bg-emerald-50/60 ring-2 ring-emerald-500' : 'border-slate-200 hover:border-slate-300'"
@@ -88,12 +81,11 @@
                 <span class="text-[10px] text-slate-400 block">/人 (共5堂)</span>
               </div>
             </div>
-            <div class="mt-2 text-[11px] text-emerald-800 bg-emerald-100/60 rounded px-2 py-1 flex items-center space-x-1">
-              <span>💵 費用說明：第一堂課於現場一次繳清 5 堂現金</span>
+            <div class="mt-2 text-[11px] text-emerald-800 bg-emerald-100/60 rounded px-2 py-1">
+              💵 費用說明：第一堂課現場繳清 5 堂現金款項
             </div>
           </div>
 
-          <!-- 進階班 -->
           <div 
             @click="form.courseType = 'advanced'; form.studentCount = 2"
             :class="form.courseType === 'advanced' ? 'border-emerald-600 bg-emerald-50/60 ring-2 ring-emerald-500' : 'border-slate-200 hover:border-slate-300'"
@@ -112,14 +104,14 @@
                 <span class="text-[10px] text-slate-400 block">/堂 (含球場費)</span>
               </div>
             </div>
-            <div class="mt-2 text-[11px] text-blue-800 bg-blue-100/60 rounded px-2 py-1 flex items-center space-x-1">
-              <span>💵 費用說明：1~2人每堂$1,400、3~4人每堂$1,500，現場交付現金</span>
+            <div class="mt-2 text-[11px] text-blue-800 bg-blue-100/60 rounded px-2 py-1">
+              💵 費用說明：1~2人每堂$1,400、3~4人每堂$1,500，現場交付現金
             </div>
           </div>
         </div>
       </div>
 
-      <!-- 上課人數選擇 -->
+      <!-- 人數選擇 -->
       <div class="space-y-1.5">
         <label class="text-sm font-bold text-slate-700">上課人數</label>
         <div v-if="form.courseType === 'basic'" class="flex space-x-3">
@@ -148,7 +140,7 @@
         </div>
       </div>
 
-      <!-- 日期與時段 -->
+      <!-- 日期與 24 小時制精確時間設定 -->
       <div class="grid grid-cols-1 gap-4">
         <div class="space-y-1.5">
           <label class="text-sm font-bold text-slate-700">期望日期 <span class="text-red-500">*</span></label>
@@ -161,24 +153,33 @@
         </div>
 
         <div class="space-y-1.5">
-          <label class="text-sm font-bold text-slate-700">期望時段區間 <span class="text-red-500">*</span></label>
-          <div class="grid grid-cols-3 gap-2">
-            <button 
-              v-for="slot in timeSlotOptions" 
-              :key="slot.value"
-              type="button"
-              @click="form.timeSlot = slot.value"
-              :class="form.timeSlot === slot.value ? 'bg-emerald-600 text-white font-semibold' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'"
-              class="py-2.5 rounded-lg text-xs transition"
-            >
-              <div>{{ slot.label }}</div>
-              <div class="text-[10px] opacity-80">{{ slot.time }}</div>
-            </button>
+          <label class="text-sm font-bold text-slate-700">期望上課時間 (24小時制) <span class="text-red-500">*</span></label>
+          <div class="grid grid-cols-2 gap-3 items-center">
+            <div>
+              <span class="text-xs text-slate-500 block mb-1">開始時間</span>
+              <select 
+                v-model="form.startTime" 
+                @change="onStartTimeChange" 
+                class="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white font-mono font-semibold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              >
+                <option v-for="t in timeOptions.slice(0, -1)" :key="t" :value="t">{{ t }}</option>
+              </select>
+            </div>
+            <div>
+              <span class="text-xs text-slate-500 block mb-1">結束時間</span>
+              <select 
+                v-model="form.endTime" 
+                class="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white font-mono font-semibold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              >
+                <option v-for="t in validEndTimes" :key="t" :value="t">{{ t }}</option>
+              </select>
+            </div>
           </div>
+          <p class="text-[11px] text-emerald-700 font-medium mt-1">⏰ 預約時段：<strong>{{ form.startTime }} - {{ form.endTime }}</strong> (整點與半點精確排課)</p>
         </div>
       </div>
 
-      <!-- 球技等級 -->
+      <!-- 程度選擇 -->
       <div class="space-y-1.5">
         <label class="text-sm font-bold text-slate-700">目前匹克球程度</label>
         <div class="grid grid-cols-2 gap-2">
@@ -195,7 +196,7 @@
         </div>
       </div>
 
-      <!-- 指定教練 (動態連動試算表教練名冊) 與場地偏好 -->
+      <!-- 指定教練與場地 -->
       <div class="grid grid-cols-1 gap-3">
         <div class="space-y-1.5">
           <label class="text-sm font-bold text-slate-700">指定教練 (選填)</label>
@@ -203,7 +204,7 @@
             v-model="form.designatedCoach" 
             class="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
           >
-            <option value="不指定(由委員會推薦)">不指定 (由委員會為您推薦合適教練)</option>
+            <option value="不指定(由委員會推薦)">不指定 (由委員會推薦合適教練)</option>
             <option v-for="c in coachList" :key="c" :value="c">{{ c }}</option>
           </select>
           <p class="text-[11px] text-slate-400">💡 指定教練享有 24 小時專屬優先接單權</p>
@@ -237,7 +238,6 @@
         </div>
       </div>
 
-      <!-- 送出按鈕 -->
       <button 
         @click="submitRequest" 
         :disabled="activeBookingsCount >= 2 || isSubmitting"
@@ -249,7 +249,7 @@
       </button>
     </section>
 
-    <!-- Tab 2: 即時空檔 (挑教練) -->
+    <!-- Tab 2: 即時空檔 -->
     <section v-if="currentTab === 'slots'" class="space-y-4">
       <div class="border-b pb-3">
         <h1 class="text-xl font-bold text-slate-900">教練已開放空檔</h1>
@@ -279,7 +279,7 @@
           <div class="mt-3 space-y-1 text-xs text-slate-600">
             <p class="flex items-center space-x-1.5">
               <span>📅 日期時間：</span>
-              <strong class="text-slate-800">{{ slot.date }} ({{ slot.timeSlot }})</strong>
+              <strong class="text-slate-800 font-mono">{{ slot.date }} ({{ slot.timeSlot }})</strong>
             </p>
             <p class="flex items-center space-x-1.5">
               <span>📍 上課球場：</span>
@@ -300,7 +300,7 @@
       </div>
     </section>
 
-    <!-- Tab 3: 我的預約 (查進度/取消) -->
+    <!-- Tab 3: 我的預約 -->
     <section v-if="currentTab === 'myBookings'" class="space-y-4">
       <div class="border-b pb-3 flex justify-between items-end">
         <div>
@@ -328,7 +328,7 @@
 
           <div class="mt-3 space-y-1.5 text-xs text-slate-600">
             <p class="text-slate-900 font-bold text-sm">{{ b.courseTitle }}</p>
-            <p>📅 時間：{{ b.date }} ({{ b.timeSlot }})</p>
+            <p>📅 時間：<strong class="font-mono">{{ b.date }} ({{ b.timeSlot }})</strong></p>
             <p>🏸 教練：{{ b.coach || '待委員會配對推薦' }}</p>
             <p>📍 場地：{{ b.venue }}</p>
             <p class="text-emerald-700 font-semibold">💵 現金應繳：NT$ {{ Number(b.fee || 1500).toLocaleString() }} (現場支付)</p>
@@ -345,7 +345,7 @@
 
             <template v-if="b.status === 'Pending' || b.status === 'Interested' || b.status === 'Confirmed'">
               <button 
-                v-if="canCancelSelf(b.date)"
+                v-if="canCancelSelf(b.date, b.timeSlot)"
                 @click="cancelBooking(b)"
                 class="px-3 py-2 border border-red-200 text-red-600 hover:bg-red-50 rounded-lg text-xs font-medium transition"
               >
@@ -365,7 +365,6 @@
 
   </main>
 
-  <!-- 底部導航欄 -->
   <nav class="bg-white border-t border-slate-200 fixed bottom-0 left-0 right-0 max-w-md mx-auto z-30 flex">
     <button 
       @click="currentTab = 'request'" 
@@ -396,7 +395,6 @@
     </button>
   </nav>
 
-  <!-- 成功彈窗 Modal -->
   <div v-if="successModal.show" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl text-center space-y-4">
       <div class="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto text-2xl font-bold">
@@ -408,7 +406,7 @@
       </div>
       <div class="bg-slate-50 p-3 rounded-xl text-left text-xs text-slate-600 space-y-1">
         <p>🏸 課程班型：<strong>{{ successModal.courseTitle }}</strong></p>
-        <p>📅 上課日期：{{ successModal.date }} ({{ successModal.timeSlot }})</p>
+        <p>📅 上課時間：<strong class="font-mono">{{ successModal.date }} ({{ successModal.timeSlot }})</strong></p>
         <p>💵 現場應備現金：<strong class="text-emerald-700 font-bold">NT$ {{ successModal.fee.toLocaleString() }}</strong></p>
       </div>
       <div class="space-y-2 pt-2">
@@ -430,12 +428,19 @@
 
 </div>
 
-<!-- Vue 3 核心互動與 GAS 連動邏輯 -->
 <script>
   const { createApp, ref, computed, reactive, onMounted } = Vue;
 
   const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwe_Xh7I8iOMDBK278mvBIIeXaVa9B3qz8bl2RfdEFT0elPW9Ff7Vg3p2sHm3COUdfkmA/exec";
   const MY_LIFF_ID = "2011535009-IsC8f5XW"; 
+
+  // 24小時制標準時間選項 (以整點與半點劃分)
+  const TIME_OPTIONS = [
+    '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30',
+    '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30',
+    '15:00', '15:30', '16:00', '16:30', '17:00', '17:30', '18:00', '18:30',
+    '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00'
+  ];
 
   createApp({
     setup() {
@@ -446,8 +451,6 @@
 
       const currentTab = ref('request');
       const isSubmitting = ref(false);
-
-      // 動態教練清單 (預設含杜和益，後續由試算表取得真實名冊)
       const coachList = ref(['杜和益 教練']);
 
       const defaultVenues = [
@@ -456,11 +459,7 @@
         '由委員會協調'
       ];
 
-      const timeSlotOptions = [
-        { label: '上午', time: '09:00-12:00', value: '上午 (09:00-12:00)' },
-        { label: '下午', time: '14:00-17:00', value: '下午 (14:00-17:00)' },
-        { label: '晚上', time: '18:00-21:00', value: '晚上 (18:00-21:00)' }
-      ];
+      const timeOptions = TIME_OPTIONS;
 
       const levelOptions = [
         { val: '1.0-2.0', title: '1.0 - 2.0', desc: '初學新手' },
@@ -473,12 +472,29 @@
         courseType: 'basic',
         studentCount: 4,
         preferredDate: getTomorrowDate(),
-        timeSlot: '上午 (09:00-12:00)',
+        startTime: '18:00',
+        endTime: '19:00',
         level: '2.0',
         designatedCoach: '不指定(由委員會推薦)',
         venuePreference: '宜蘭國民運動中心',
         notes: ''
       });
+
+      // 結束時間下拉選單 (必須晚於開始時間)
+      const validEndTimes = computed(() => {
+        const startIndex = TIME_OPTIONS.indexOf(form.startTime);
+        return TIME_OPTIONS.slice(startIndex + 1);
+      });
+
+      // 開始時間變更時，自動將結束時間預設為 1 小時後
+      function onStartTimeChange() {
+        const startIndex = TIME_OPTIONS.indexOf(form.startTime);
+        if (startIndex + 2 < TIME_OPTIONS.length) {
+          form.endTime = TIME_OPTIONS[startIndex + 2];
+        } else if (startIndex + 1 < TIME_OPTIONS.length) {
+          form.endTime = TIME_OPTIONS[startIndex + 1];
+        }
+      }
 
       const availableSlots = ref([]);
       const myBookings = ref([]);
@@ -511,25 +527,17 @@
             console.warn('LIFF 載入失敗，採用預設身分:', err);
           }
         }
-
         await loadStudentData();
       });
 
-      // 從後端 GAS 同步空檔、個人預約以及動態教練名冊
       async function loadStudentData() {
         try {
           const res = await fetch(`${GAS_API_URL}?action=getStudentData&uid=${userProfile.userId}`);
           const data = await res.json();
           if (data.status === 'success') {
-            // 1. 動態更新認證教練下拉選單
             if (data.approvedCoaches && data.approvedCoaches.length > 0) {
               coachList.value = data.approvedCoaches;
-            } else if (data.openSlots && data.openSlots.length > 0) {
-              const uniqueCoaches = [...new Set(data.openSlots.map(s => s.coachName))];
-              if (uniqueCoaches.length > 0) coachList.value = uniqueCoaches;
             }
-
-            // 2. 更新開放空檔
             availableSlots.value = (data.openSlots || []).map(s => ({
               slotId: s.slotId,
               coachName: s.coachName,
@@ -538,7 +546,6 @@
               venue: s.venueOption
             }));
 
-            // 3. 更新個人預約紀錄
             const combined = [];
             (data.myMatches || []).forEach(m => {
               combined.push({
@@ -599,6 +606,7 @@
         const courseTitle = form.courseType === 'basic' 
           ? `初階團體培訓班 (${form.studentCount}人)` 
           : `進階精緻單堂課 (${form.studentCount}人)`;
+        const timeSlotString = `${form.startTime} - ${form.endTime}`;
 
         const payload = {
           action: 'submitStudentRequest',
@@ -606,7 +614,7 @@
           studentName: userProfile.name,
           courseType: courseTitle,
           preferredDate: form.preferredDate,
-          timeSlot: form.timeSlot,
+          timeSlot: timeSlotString,
           level: form.level,
           studentCount: form.studentCount,
           designatedCoach: form.designatedCoach,
@@ -626,10 +634,9 @@
             successModal.reqId = result.reqId;
             successModal.courseTitle = courseTitle;
             successModal.date = form.preferredDate;
-            successModal.timeSlot = form.timeSlot;
+            successModal.timeSlot = timeSlotString;
             successModal.fee = fee;
             successModal.show = true;
-
             await loadStudentData();
           } else {
             alert('提單失敗：' + result.message);
@@ -688,9 +695,13 @@
         }
       }
 
-      function canCancelSelf(lessonDateStr) {
+      function canCancelSelf(lessonDateStr, timeSlotStr) {
         if (!lessonDateStr) return false;
-        const lessonDate = new Date(lessonDateStr + 'T09:00:00');
+        let startTime = '08:00';
+        if (timeSlotStr && timeSlotStr.includes('-')) {
+          startTime = timeSlotStr.split('-')[0].trim();
+        }
+        const lessonDate = new Date(`${lessonDateStr}T${startTime}:00`);
         const now = new Date();
         const diffHours = (lessonDate - now) / (1000 * 60 * 60);
         return diffHours >= 24;
@@ -728,7 +739,15 @@
         const details = encodeURIComponent(`單號: ${booking.id}\n執教教練: ${booking.coach}\n應備現金: NT$ ${booking.fee}`);
         const location = encodeURIComponent(booking.venue);
         const dateClean = booking.date.replace(/-/g, '');
-        const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&location=${location}&dates=${dateClean}T090000/${dateClean}T100000`;
+        
+        let startT = '090000';
+        let endT = '100000';
+        if (booking.timeSlot && booking.timeSlot.includes('-')) {
+          const parts = booking.timeSlot.split('-');
+          startT = parts[0].trim().replace(':', '') + '00';
+          endT = parts[1].trim().replace(':', '') + '00';
+        }
+        const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&location=${location}&dates=${dateClean}T${startT}/${dateClean}T${endT}`;
         window.open(gcalUrl, '_blank');
       }
 
@@ -770,7 +789,9 @@
         isSubmitting,
         coachList,
         defaultVenues,
-        timeSlotOptions,
+        timeOptions,
+        validEndTimes,
+        onStartTimeChange,
         levelOptions,
         form,
         availableSlots,
