@@ -254,7 +254,6 @@
           <p class="text-slate-500">📅 {{ m.date || m.lessonDate }} ({{ m.timeSlot || m.lessonTime }}) 📍 {{ m.venue }}</p>
           
           <div class="pt-1 flex space-x-2">
-            <!-- 幹部也可代為完課 -->
             <button 
               v-if="m.status === 'Confirmed'"
               @click="markCompletedAdmin(m)"
@@ -330,123 +329,243 @@
       </div>
     </section>
 
-    <!-- Tab 4: 結課均分記帳工作台 (完全連動教練完課回報) -->
+    <!-- Tab 4: 結課均分記帳與教練發薪作帳看板 -->
     <section v-if="currentTab === 'accounting'" class="space-y-4">
       <div class="border-b pb-3">
-        <h1 class="text-xl font-bold text-slate-900">課堂均分記帳模組</h1>
-        <p class="text-xs text-slate-500 mt-0.5">讀取教練完課簽到回報，一鍵扣除場地費並均分教練薪資</p>
+        <h1 class="text-xl font-bold text-slate-900">財務記帳與發薪看板</h1>
+        <p class="text-xs text-slate-500 mt-0.5">課堂結算傳票 (ACC-) ↔ 教練實領薪資作帳管理</p>
       </div>
 
-      <!-- 核心試算卡片 -->
-      <div class="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 text-xs">
-        <div class="flex justify-between items-center">
-          <h2 class="font-bold text-slate-900 text-sm">課堂收支試算</h2>
-          <span class="text-[11px] text-purple-700 font-bold bg-purple-100 px-2 py-0.5 rounded-full">
-            待核銷: {{ completedMatches.length }} 筆
-          </span>
-        </div>
-
-        <!-- 選擇完課訂單下拉選單 -->
-        <div class="space-y-1">
-          <label class="font-bold text-slate-700 block">選擇待核銷完課訂單 (MAT-) <span class="text-red-500">*</span></label>
-          <select 
-            v-model="selectedMatId" 
-            @change="onSelectMatch"
-            class="w-full px-3 py-2.5 border border-purple-300 rounded-lg text-xs bg-white font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none"
-          >
-            <option value="">-- 請下拉選取已簽到之完課紀錄 --</option>
-            <option v-for="m in completedMatches" :key="m.matId" :value="m.matId">
-              {{ m.matId }} | {{ m.studentName }} | {{ m.date }}
-            </option>
-          </select>
-        </div>
-
-        <!-- 若無完課單時的提示與測試小按鈕 -->
-        <div v-if="completedMatches.length === 0" class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 space-y-1">
-          <p>⚠️ 目前無教練簽到完成的待核銷訂單。</p>
-          <button @click="loadMockCompleted" class="text-xs text-blue-700 underline font-semibold">
-            點此載入 1 筆測試完課紀錄
-          </button>
-        </div>
-
-        <!-- 帶入之課程資訊摘要 -->
-        <div v-if="currentSelectedMatch" class="p-2.5 bg-purple-50/70 border border-purple-200 rounded-lg space-y-1 text-slate-700">
-          <p>🏸 課程：<strong>{{ currentSelectedMatch.courseTitle }}</strong></p>
-          <p>👤 學員：{{ currentSelectedMatch.studentName }} ({{ currentSelectedMatch.venue }})</p>
-          <p>👥 執教教練名單：<strong class="text-purple-800">{{ calcForm.coachNames }}</strong></p>
-        </div>
-
-        <!-- 金額試算輸入列 -->
-        <div class="grid grid-cols-2 gap-2">
-          <div class="space-y-1">
-            <label class="font-bold text-slate-700">實收學費總額 (NT$)</label>
-            <input 
-              type="number" 
-              v-model.number="calcForm.revenue" 
-              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white font-bold text-emerald-700 focus:outline-none"
-            >
-          </div>
-          <div class="space-y-1">
-            <label class="font-bold text-slate-700">實付場地費 (NT$)</label>
-            <input 
-              type="number" 
-              v-model.number="calcForm.venueCost" 
-              placeholder="輸入發票支出"
-              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white font-bold text-red-600 focus:outline-none"
-            >
-          </div>
-        </div>
-
-        <!-- 出勤教練人數按鈕 -->
-        <div class="space-y-1">
-          <label class="font-bold text-slate-700">出勤教練人數</label>
-          <div class="flex space-x-2">
-            <button 
-              v-for="num in [1, 2, 3]" 
-              :key="num"
-              type="button"
-              @click="calcForm.coachCount = num"
-              :class="calcForm.coachCount === num ? 'bg-purple-700 text-white font-bold' : 'bg-white text-slate-700 border border-slate-200'"
-              class="flex-1 py-1.5 rounded-lg text-xs transition"
-            >
-              {{ num }} 位教練
-            </button>
-          </div>
-        </div>
-
-        <!-- 即時核算結果框 (對齊截圖風格) -->
-        <div class="bg-white p-3 rounded-lg border border-purple-200 space-y-1.5 text-xs">
-          <div class="flex justify-between items-center">
-            <span class="text-slate-500">教練分配總酬勞：</span>
-            <strong class="text-slate-900 text-sm">NT$ {{ netCoachPool.toLocaleString() }}</strong>
-          </div>
-          <div class="flex justify-between items-center text-purple-700 font-bold text-sm pt-1 border-t border-slate-100">
-            <span>每位教練實得：</span>
-            <span class="text-base">NT$ {{ perCoachPay.toLocaleString() }}</span>
-          </div>
-        </div>
-
-        <!-- 確認送出核銷 -->
+      <!-- 頂部次分頁切換 (核銷試算 vs 教練發薪統整表) -->
+      <div class="flex p-1 bg-slate-200 rounded-xl text-xs font-bold">
         <button 
-          @click="generateAccountingSlip" 
-          :disabled="!selectedMatId"
-          :class="!selectedMatId ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-purple-700 hover:bg-purple-800 text-white shadow-md shadow-purple-700/20'"
-          class="w-full py-3 rounded-xl font-bold text-xs transition"
+          @click="accountingSubView = 'slip'"
+          :class="accountingSubView === 'slip' ? 'bg-white text-purple-800 shadow-sm' : 'text-slate-600 hover:text-slate-800'"
+          class="flex-1 py-2 rounded-lg transition text-center"
         >
-          確認核銷並生成記帳單 (ACC-)
+          📝 課堂收支核銷 ({{ completedMatches.length }})
+        </button>
+        <button 
+          @click="accountingSubView = 'payroll'"
+          :class="accountingSubView === 'payroll' ? 'bg-white text-purple-800 shadow-sm' : 'text-slate-600 hover:text-slate-800'"
+          class="flex-1 py-2 rounded-lg transition text-center flex items-center justify-center space-x-1.5"
+        >
+          <span>👥 教練發薪統整表</span>
+          <span v-if="totalPendingPayout > 0" class="w-2 h-2 rounded-full bg-red-500"></span>
         </button>
       </div>
 
-      <!-- 最近核銷紀錄 -->
-      <div class="space-y-2 pt-2">
-        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider">最近核銷紀錄 ({{ accountingLogs.length }})</h3>
-        <div v-for="acc in accountingLogs" :key="acc.accId" class="p-3 bg-white border border-slate-200 rounded-xl space-y-1 text-xs shadow-sm">
+      <!-- 子視圖 1: 課堂收支核銷試算 -->
+      <div v-if="accountingSubView === 'slip'" class="space-y-4">
+        <!-- 核心試算卡片 -->
+        <div class="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 text-xs">
           <div class="flex justify-between items-center">
-            <span class="font-mono font-bold text-purple-700">{{ acc.accId }}</span>
-            <span class="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full">已結清</span>
+            <h2 class="font-bold text-slate-900 text-sm">課堂收支試算</h2>
+            <span class="text-[11px] text-purple-700 font-bold bg-purple-100 px-2 py-0.5 rounded-full">
+              待核銷: {{ completedMatches.length }} 筆
+            </span>
           </div>
-          <p class="text-slate-800">收入 NT${{ acc.revenue.toLocaleString() }} - 場地 NT${{ acc.venueCost.toLocaleString() }} = 酬勞 NT${{ acc.pool.toLocaleString() }}</p>
-          <p class="text-slate-500 text-[11px]">執教：{{ acc.coachNames }} (每人 NT${{ acc.perPay.toLocaleString() }})</p>
+
+          <!-- 選擇完課訂單下拉選單 -->
+          <div class="space-y-1">
+            <label class="font-bold text-slate-700 block">選擇待核銷完課訂單 (MAT-) <span class="text-red-500">*</span></label>
+            <select 
+              v-model="selectedMatId" 
+              @change="onSelectMatch"
+              class="w-full px-3 py-2.5 border border-purple-300 rounded-lg text-xs bg-white font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none"
+            >
+              <option value="">-- 請下拉選取已簽到之完課紀錄 --</option>
+              <option v-for="m in completedMatches" :key="m.matId" :value="m.matId">
+                {{ m.matId }} | {{ m.studentName }} | {{ m.date }}
+              </option>
+            </select>
+          </div>
+
+          <!-- 若無完課單時的提示 -->
+          <div v-if="completedMatches.length === 0" class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 space-y-1">
+            <p>⚠️ 目前無教練簽到完成的待核銷訂單。</p>
+            <button @click="loadMockCompleted" class="text-xs text-blue-700 underline font-semibold">
+              點此載入 1 筆測試完課紀錄
+            </button>
+          </div>
+
+          <!-- 帶入之課程資訊摘要 -->
+          <div v-if="currentSelectedMatch" class="p-2.5 bg-purple-50/70 border border-purple-200 rounded-lg space-y-1 text-slate-700">
+            <p>🏸 課程：<strong>{{ currentSelectedMatch.courseTitle }}</strong></p>
+            <p>👤 學員：{{ currentSelectedMatch.studentName }} ({{ currentSelectedMatch.venue }})</p>
+            <p>👥 執教教練：<strong class="text-purple-800">{{ calcForm.coachNames }}</strong></p>
+          </div>
+
+          <!-- 金額試算輸入列 -->
+          <div class="grid grid-cols-2 gap-2">
+            <div class="space-y-1">
+              <label class="font-bold text-slate-700">實收學費總額 (NT$)</label>
+              <input 
+                type="number" 
+                v-model.number="calcForm.revenue" 
+                class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white font-bold text-emerald-700 focus:outline-none"
+              >
+            </div>
+            <div class="space-y-1">
+              <label class="font-bold text-slate-700">實付場地費 (NT$)</label>
+              <input 
+                type="number" 
+                v-model.number="calcForm.venueCost" 
+                placeholder="輸入球場支出"
+                class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white font-bold text-red-600 focus:outline-none"
+              >
+            </div>
+          </div>
+
+          <!-- 出勤教練人數按鈕 -->
+          <div class="space-y-1">
+            <label class="font-bold text-slate-700">出勤教練人數</label>
+            <div class="flex space-x-2">
+              <button 
+                v-for="num in [1, 2, 3]" 
+                :key="num"
+                type="button"
+                @click="calcForm.coachCount = num"
+                :class="calcForm.coachCount === num ? 'bg-purple-700 text-white font-bold' : 'bg-white text-slate-700 border border-slate-200'"
+                class="flex-1 py-1.5 rounded-lg text-xs transition"
+              >
+                {{ num }} 位教練
+              </button>
+            </div>
+          </div>
+
+          <!-- 即時核算結果框 -->
+          <div class="bg-white p-3 rounded-lg border border-purple-200 space-y-1.5 text-xs">
+            <div class="flex justify-between items-center">
+              <span class="text-slate-500">教練分配總酬勞：</span>
+              <strong class="text-slate-900 text-sm">NT$ {{ netCoachPool.toLocaleString() }}</strong>
+            </div>
+            <div class="flex justify-between items-center text-purple-700 font-bold text-sm pt-1 border-t border-slate-100">
+              <span>每位教練實得：</span>
+              <span class="text-base">NT$ {{ perCoachPay.toLocaleString() }}</span>
+            </div>
+          </div>
+
+          <!-- 確認送出核銷 -->
+          <button 
+            @click="generateAccountingSlip" 
+            :disabled="!selectedMatId"
+            :class="!selectedMatId ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-purple-700 hover:bg-purple-800 text-white shadow-md shadow-purple-700/20'"
+            class="w-full py-3 rounded-xl font-bold text-xs transition"
+          >
+            確認核銷並生成記帳傳票 (ACC-)
+          </button>
+        </div>
+
+        <!-- 歷史核銷紀錄 -->
+        <div class="space-y-2 pt-2">
+          <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider">最近核銷傳票 ({{ accountingLogs.length }})</h3>
+          <div v-for="acc in accountingLogs" :key="acc.accId" class="p-3 bg-white border border-slate-200 rounded-xl space-y-1 text-xs shadow-sm">
+            <div class="flex justify-between items-center">
+              <span class="font-mono font-bold text-purple-700">{{ acc.accId }}</span>
+              <span class="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full">已結清傳票</span>
+            </div>
+            <p class="text-slate-800">收入 NT${{ acc.revenue.toLocaleString() }} - 場地 NT${{ acc.venueCost.toLocaleString() }} = 酬勞 NT${{ acc.pool.toLocaleString() }}</p>
+            <p class="text-slate-500 text-[11px]">執教：{{ acc.coachNames }} (每人 NT${{ acc.perPay.toLocaleString() }})</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 子視圖 2: 教練薪資發放作帳統整表 (核心亮點) -->
+      <div v-if="accountingSubView === 'payroll'" class="space-y-4">
+        <!-- 頂部撥款總體概況 -->
+        <div class="grid grid-cols-2 gap-3">
+          <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
+            <span class="text-[11px] text-amber-700 font-bold block">待發放薪資總額</span>
+            <span class="text-lg font-extrabold text-amber-900">NT$ {{ totalPendingPayout.toLocaleString() }}</span>
+          </div>
+          <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-center">
+            <span class="text-[11px] text-emerald-700 font-bold block">已發放結清總額</span>
+            <span class="text-lg font-extrabold text-emerald-900">NT$ {{ totalPaidPayout.toLocaleString() }}</span>
+          </div>
+        </div>
+
+        <!-- 教練統整名冊列表卡片 -->
+        <div class="space-y-3">
+          <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider">教練薪酬發放清冊</h2>
+          
+          <div 
+            v-for="coach in coachPayrollSummaries" 
+            :key="coach.name"
+            class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm transition"
+          >
+            <!-- 卡片頂部概況列 -->
+            <div class="p-3.5 flex justify-between items-center bg-slate-50/50 border-b border-slate-100">
+              <div class="flex items-center space-x-2.5">
+                <div class="w-8 h-8 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center font-bold text-xs">
+                  {{ coach.name.charAt(0) }}
+                </div>
+                <div>
+                  <h3 class="font-bold text-sm text-slate-900">{{ coach.name }}</h3>
+                  <p class="text-[10px] text-slate-400">執教課堂：{{ coach.items.length }} 堂</p>
+                </div>
+              </div>
+
+              <!-- 待發金額狀態徽章 -->
+              <div class="text-right">
+                <span v-if="coach.pendingAmount > 0" class="text-sm font-extrabold text-amber-600 block">
+                  應發 NT$ {{ coach.pendingAmount.toLocaleString() }}
+                </span>
+                <span v-else class="text-xs font-bold text-emerald-600 block">
+                  ✓ 薪資全數結清
+                </span>
+                <span class="text-[10px] text-slate-400">已領 NT$ {{ coach.paidAmount.toLocaleString() }}</span>
+              </div>
+            </div>
+
+            <!-- 課堂薪資明細 (逐筆發放作帳) -->
+            <div class="p-3 space-y-2 bg-white">
+              <div 
+                v-for="item in coach.items" 
+                :key="item.payId"
+                class="p-2.5 rounded-lg border border-slate-100 flex justify-between items-center text-xs"
+                :class="item.isPaid ? 'bg-slate-50/60' : 'bg-amber-50/30 border-amber-100'"
+              >
+                <div>
+                  <div class="flex items-center space-x-1.5">
+                    <span class="font-mono font-bold text-[10px] text-purple-700">{{ item.accId }}</span>
+                    <strong class="text-slate-800">{{ item.courseTitle }}</strong>
+                  </div>
+                  <p class="text-[11px] text-slate-500 mt-0.5">📅 {{ item.date }} | 應得分潤：<strong class="text-slate-900">NT$ {{ item.amount.toLocaleString() }}</strong></p>
+                  <p v-if="item.isPaid" class="text-[10px] text-emerald-600 font-medium">✓ 已於 {{ item.paidAt }} 發放</p>
+                </div>
+
+                <!-- 標記發放動作按鈕 -->
+                <div>
+                  <button 
+                    v-if="!item.isPaid"
+                    @click="markPayoutCompleted(item)"
+                    class="py-1.5 px-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-lg text-xs shadow-sm transition"
+                  >
+                    標記已發放
+                  </button>
+                  <button 
+                    v-else
+                    @click="revertPayout(item)"
+                    class="py-1 px-2 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded text-[11px] transition"
+                    title="點擊切換回未發放"
+                  >
+                    已領取完成
+                  </button>
+                </div>
+              </div>
+
+              <!-- 一鍵結清按鈕 -->
+              <div v-if="coach.pendingAmount > 0" class="pt-1">
+                <button 
+                  @click="settleAllForCoach(coach)"
+                  class="w-full py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-xs font-bold transition"
+                >
+                  一鍵結清 {{ coach.name }} 所有待領款項 (NT$ {{ coach.pendingAmount.toLocaleString() }})
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -492,9 +611,9 @@
     >
       <span class="text-lg">💰</span>
       <span class="text-[10px] mt-0.5">均分記帳</span>
-      <!-- 動態紅點：有待核銷訂單時提醒 -->
-      <span v-if="completedMatches.length > 0" class="absolute top-1.5 right-4 w-4 h-4 bg-emerald-600 text-white rounded-full text-[9px] flex items-center justify-center font-bold">
-        {{ completedMatches.length }}
+      <!-- 動態紅點提醒：有待核銷完課單或待發放薪酬時提示 -->
+      <span v-if="completedMatches.length > 0 || totalPendingPayout > 0" class="absolute top-1.5 right-4 w-4 h-4 bg-emerald-600 text-white rounded-full text-[9px] flex items-center justify-center font-bold">
+        {{ completedMatches.length || '!' }}
       </span>
     </button>
   </nav>
@@ -514,7 +633,8 @@
       });
 
       const isAdminApproved = ref(true);
-      const currentTab = ref('accounting'); // 進入預設可直奔均分記帳驗收
+      const currentTab = ref('accounting');
+      const accountingSubView = ref('payroll'); // 預設直接檢視教練發薪看板
 
       const approvedCoaches = ref(['杜和益 教練', '王教練', '李教練']);
 
@@ -537,7 +657,7 @@
         }
       ]);
 
-      // 總課表清單（與教練端完全同步）
+      // 總課表清單
       const allMatches = ref([
         {
           matId: 'MAT-20260915-001',
@@ -550,7 +670,7 @@
           expectedFee: 1400,
           actualRevenue: 1400,
           coachCount: 1,
-          status: 'Completed' // 預載為已簽到完課，方便立即測試下拉記帳
+          status: 'Completed' // 待核銷
         },
         {
           matId: 'MAT-20260918-002',
@@ -585,12 +705,11 @@
         designatedCoach: ''
       });
 
-      // 篩選出所有「已完課簽到・待核銷」的訂單
+      // 篩選待核銷完課單
       const completedMatches = computed(() => {
         return allMatches.value.filter(m => m.status === 'Completed');
       });
 
-      // 當前選中的完課單號
       const selectedMatId = ref('');
       const currentSelectedMatch = ref(null);
 
@@ -602,7 +721,6 @@
         coachNames: ''
       });
 
-      // 下拉選中完課紀錄時，自動帶入學費與教練人數
       function onSelectMatch() {
         const found = allMatches.value.find(m => m.matId === selectedMatId.value);
         if (found) {
@@ -617,28 +735,203 @@
         }
       }
 
-      // 可分配教練酬勞總額
       const netCoachPool = computed(() => {
         const pool = calcForm.revenue - calcForm.venueCost;
         return pool > 0 ? pool : 0;
       });
 
-      // 每位教練實發金額
       const perCoachPay = computed(() => {
         return calcForm.coachCount > 0 ? Math.round(netCoachPool.value / calcForm.coachCount) : 0;
       });
 
-      // 歷史核銷記帳紀錄
+      // 記帳流水傳票
       const accountingLogs = ref([
         {
           accId: 'ACC-20260909-001',
           revenue: 2800,
           venueCost: 600,
           pool: 2200,
-          coachNames: '杜和益、王教練',
+          coachNames: '杜和益 教練、王教練',
           perPay: 1100
         }
       ]);
+
+      // 核心：教練薪資發放清冊資料庫 (Payout Records)
+      const payoutRecords = ref([
+        {
+          payId: 'PAY-001',
+          accId: 'ACC-20260909-001',
+          coachName: '杜和益 教練',
+          courseTitle: '進階單堂課 (2人)',
+          date: '2026-09-09',
+          amount: 1100,
+          isPaid: true, // 已發放
+          paidAt: '09-09 17:30'
+        },
+        {
+          payId: 'PAY-002',
+          accId: 'ACC-20260909-001',
+          coachName: '王教練',
+          courseTitle: '進階單堂課 (2人)',
+          date: '2026-09-09',
+          amount: 1100,
+          isPaid: false, // 待發放
+          paidAt: null
+        }
+      ]);
+
+      // 彙總教練發薪清單
+      const coachPayrollSummaries = computed(() => {
+        const map = {};
+        // 先建立教練名冊基底
+        approvedCoaches.value.forEach(name => {
+          map[name] = {
+            name: name,
+            pendingAmount: 0,
+            paidAmount: 0,
+            items: []
+          };
+        });
+
+        // 整理所有發薪細項
+        payoutRecords.value.forEach(p => {
+          if (!map[p.coachName]) {
+            map[p.coachName] = {
+              name: p.coachName,
+              pendingAmount: 0,
+              paidAmount: 0,
+              items: []
+            };
+          }
+          map[p.coachName].items.unshift(p);
+          if (p.isPaid) {
+            map[p.coachName].paidAmount += p.amount;
+          } else {
+            map[p.coachName].pendingAmount += p.amount;
+          }
+        });
+
+        return Object.values(map);
+      });
+
+      // 待發與已發總計
+      const totalPendingPayout = computed(() => {
+        return payoutRecords.value
+          .filter(p => !p.isPaid)
+          .reduce((sum, p) => sum + p.amount, 0);
+      });
+
+      const totalPaidPayout = computed(() => {
+        return payoutRecords.value
+          .filter(p => p.isPaid)
+          .reduce((sum, p) => sum + p.amount, 0);
+      });
+
+      // 標記單堂發放完成
+      function markPayoutCompleted(item) {
+        item.isPaid = true;
+        const now = new Date();
+        item.paidAt = `${now.getMonth() + 1}-${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
+        syncStorage();
+        alert(`已成功標記單號 ${item.payId} 為已發放領取！\n金額：NT$ ${item.amount}`);
+      }
+
+      // 復原發放狀態
+      function revertPayout(item) {
+        if (confirm(`確定要將單號 ${item.payId} 重置為「待發放」狀態嗎？`)) {
+          item.isPaid = false;
+          item.paidAt = null;
+          syncStorage();
+        }
+      }
+
+      // 一鍵結清教練全額薪資
+      function settleAllForCoach(coach) {
+        if (confirm(`確定要將 ${coach.name} 目前所有待發薪資 (NT$ ${coach.pendingAmount.toLocaleString()}) 全數結清發放嗎？`)) {
+          const now = new Date();
+          const stamp = `${now.getMonth() + 1}-${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
+          coach.items.forEach(i => {
+            if (!i.isPaid) {
+              i.isPaid = true;
+              i.paidAt = stamp;
+            }
+          });
+          syncStorage();
+          alert(`已完成 ${coach.name} 全額薪資發放結清作業！`);
+        }
+      }
+
+      // 產生 ACC 傳票並自動分拆建立發薪紀錄
+      function generateAccountingSlip() {
+        if (!selectedMatId.value || !currentSelectedMatch.value) {
+          alert('請先下拉選取待核銷的完課單號！');
+          return;
+        }
+
+        const newAccId = `ACC-20260910-${Math.floor(100 + Math.random() * 900)}`;
+        
+        // 1. 新增傳票
+        accountingLogs.value.unshift({
+          accId: newAccId,
+          matId: selectedMatId.value,
+          revenue: calcForm.revenue,
+          venueCost: calcForm.venueCost,
+          pool: netCoachPool.value,
+          coachNames: calcForm.coachNames,
+          perPay: perCoachPay.value
+        });
+
+        // 2. 自動將教練款項拆分為待發薪項目
+        const rawCoaches = calcForm.coachNames.split(/[,、]/).map(s => s.trim()).filter(Boolean);
+        const coachesToPay = rawCoaches.length > 0 ? rawCoaches : ['杜和益 教練'];
+
+        coachesToPay.forEach((cName, idx) => {
+          payoutRecords.value.unshift({
+            payId: `PAY-${Date.now().toString().slice(-4)}-${idx + 1}`,
+            accId: newAccId,
+            coachName: cName,
+            courseTitle: currentSelectedMatch.value.courseTitle,
+            date: currentSelectedMatch.value.date || getTomorrowDate(),
+            amount: perCoachPay.value,
+            isPaid: false, // 剛核算完，預設為待發放
+            paidAt: null
+          });
+        });
+
+        // 3. 課堂狀態改為已核銷 Settled
+        currentSelectedMatch.value.status = 'Settled';
+        syncStorage();
+
+        alert(`核銷成功！\n生成傳票單號：${newAccId}\n已自動建立 ${coachesToPay.length} 筆教練待發薪資項目，可切換至「教練發薪統整表」查閱發放！`);
+
+        // 切換到發薪看板檢視
+        accountingSubView.value = 'payroll';
+        selectedMatId.value = '';
+        currentSelectedMatch.value = null;
+        calcForm.revenue = 0;
+      }
+
+      function loadMockCompleted() {
+        allMatches.value.unshift({
+          matId: `MAT-20260910-${Math.floor(100 + Math.random() * 900)}`,
+          courseTitle: '進階單堂課 (2人)',
+          studentName: '陳大文 等 2 人',
+          coachNames: '杜和益 教練、王教練',
+          date: '2026-09-10',
+          timeSlot: '14:00-15:00',
+          venue: '宜蘭國民運動中心',
+          expectedFee: 1400,
+          actualRevenue: 1400,
+          coachCount: 2,
+          status: 'Completed'
+        });
+        syncStorage();
+      }
+
+      function syncStorage() {
+        localStorage.setItem('pickle_matches', JSON.stringify(allMatches.value));
+        localStorage.setItem('pickle_payouts', JSON.stringify(payoutRecords.value));
+      }
 
       function formatUid(uid) {
         return uid ? uid.substring(0, 8) + '...' + uid.slice(-4) : '';
@@ -650,7 +943,6 @@
         return d.toISOString().split('T')[0];
       }
 
-      // 衝堂檢核
       function checkConflict(coachName, date, timeSlot) {
         if (!coachName) return false;
         return allMatches.value.some(m => 
@@ -661,7 +953,6 @@
         );
       }
 
-      // 撮合確認
       function confirmMatch(req) {
         const newMatId = `MAT-20260910-${Math.floor(100 + Math.random() * 900)}`;
         allMatches.value.unshift({
@@ -682,7 +973,6 @@
         alert(`撮合排程成功！生成訂單單號：${newMatId}`);
       }
 
-      // 代客提單
       function submitProxyBooking() {
         if (!proxyForm.studentName) {
           alert('請輸入學員稱呼！');
@@ -709,18 +999,17 @@
         currentTab.value = 'matching';
       }
 
-      // 幹部代為標註完課
       function markCompletedAdmin(match) {
         match.status = 'Completed';
         match.actualRevenue = match.expectedFee || 1400;
         syncStorage();
-        alert(`單號 ${match.matId} 已標記完課！請切換至「均分記帳」分頁清算收支。`);
+        alert(`單號 ${match.matId} 已標記完課！請至均分記帳頁核銷。`);
         currentTab.value = 'accounting';
+        accountingSubView.value = 'slip';
         selectedMatId.value = match.matId;
         onSelectMatch();
       }
 
-      // 代客取消
       function forceCancel(match) {
         const reason = prompt('請輸入強制取消原因（如：宜蘭強降雨球場濕滑、學員突發事故）：');
         if (reason) {
@@ -730,7 +1019,6 @@
         }
       }
 
-      // 核准教練
       function approveCoach(coach) {
         approvedCoaches.value.push(coach.displayName);
         pendingCoaches.value = pendingCoaches.value.filter(c => c.uid !== coach.uid);
@@ -744,59 +1032,6 @@
       function approveAdmin(admin) {
         pendingAdmins.value = pendingAdmins.value.filter(a => a.uid !== admin.uid);
         alert(`已核准 ${admin.displayName} 成為委員會幹部！`);
-      }
-
-      // 生成記帳單並結案 (核心功能)
-      function generateAccountingSlip() {
-        if (!selectedMatId.value || !currentSelectedMatch.value) {
-          alert('請先下拉選取待核銷的完課單號！');
-          return;
-        }
-
-        const newAccId = `ACC-20260910-${Math.floor(100 + Math.random() * 900)}`;
-        
-        // 1. 新增記帳流水
-        accountingLogs.value.unshift({
-          accId: newAccId,
-          matId: selectedMatId.value,
-          revenue: calcForm.revenue,
-          venueCost: calcForm.venueCost,
-          pool: netCoachPool.value,
-          coachNames: calcForm.coachNames,
-          perPay: perCoachPay.value
-        });
-
-        // 2. 將該課堂正式改為「已核銷結清 (Settled)」
-        currentSelectedMatch.value.status = 'Settled';
-        syncStorage();
-
-        alert(`核銷成功！\n生成傳票單號：${newAccId}\n單號 ${selectedMatId.value} 狀態已轉為已結算！`);
-
-        // 3. 重置下拉選單
-        selectedMatId.value = '';
-        currentSelectedMatch.value = null;
-        calcForm.revenue = 0;
-      }
-
-      function loadMockCompleted() {
-        allMatches.value.unshift({
-          matId: `MAT-20260910-${Math.floor(100 + Math.random() * 900)}`,
-          courseTitle: '進階單堂課 (2人)',
-          studentName: '陳大文 等 2 人',
-          coachNames: '杜和益 教練',
-          date: '2026-09-10',
-          timeSlot: '14:00-15:00',
-          venue: '宜蘭國民運動中心',
-          expectedFee: 1400,
-          actualRevenue: 1400,
-          coachCount: 1,
-          status: 'Completed'
-        });
-        syncStorage();
-      }
-
-      function syncStorage() {
-        localStorage.setItem('pickle_matches', JSON.stringify(allMatches.value));
       }
 
       function copyUid() {
@@ -816,7 +1051,6 @@
         if (savedUid) adminProfile.userId = savedUid;
         if (savedName) adminProfile.name = savedName;
 
-        // 讀取教練端同步過來的排程與簽到狀態
         const savedMatches = localStorage.getItem('pickle_matches');
         if (savedMatches) {
           try {
@@ -826,7 +1060,13 @@
           syncStorage();
         }
 
-        // 預設選中第一筆完課紀錄
+        const savedPayouts = localStorage.getItem('pickle_payouts');
+        if (savedPayouts) {
+          try {
+            payoutRecords.value = JSON.parse(savedPayouts);
+          } catch(e) {}
+        }
+
         if (completedMatches.value.length > 0) {
           selectedMatId.value = completedMatches.value[0].matId;
           onSelectMatch();
@@ -837,6 +1077,7 @@
         adminProfile,
         isAdminApproved,
         currentTab,
+        accountingSubView,
         approvedCoaches,
         pendingRequests,
         allMatches,
@@ -850,6 +1091,10 @@
         netCoachPool,
         perCoachPay,
         accountingLogs,
+        payoutRecords,
+        coachPayrollSummaries,
+        totalPendingPayout,
+        totalPaidPayout,
         formatUid,
         checkConflict,
         confirmMatch,
@@ -862,6 +1107,9 @@
         onSelectMatch,
         generateAccountingSlip,
         loadMockCompleted,
+        markPayoutCompleted,
+        revertPayout,
+        settleAllForCoach,
         copyUid,
         applyForAdmin
       };
