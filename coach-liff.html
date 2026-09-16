@@ -45,12 +45,6 @@
         >
           🔄
         </button>
-        <button 
-          @click="toggleApprovalStatus" 
-          class="text-xs bg-blue-900/90 hover:bg-blue-950 px-2 py-1 rounded-lg text-blue-100 border border-blue-600 transition"
-        >
-          {{ isApproved ? '模擬非白名單' : '切換已核准' }}
-        </button>
       </div>
     </div>
   </header>
@@ -449,7 +443,7 @@
 
   createApp({
     setup() {
-      const isApproved = ref(true);
+      const isApproved = ref(false);
       const currentTab = ref('schedule');
       const isPublishing = ref(false);
       const isApplying = ref(false);
