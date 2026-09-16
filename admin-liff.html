@@ -504,8 +504,8 @@
           <div v-for="acc in rawAccounting" :key="acc.accId" class="p-3 bg-white border border-slate-200 rounded-xl space-y-1 text-xs shadow-sm">
             <div class="flex justify-between items-center">
               <span class="font-mono font-bold text-purple-700">{{ acc.accId }}</span>
-              <span :class="acc.status === 'Settled' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'" class="text-[10px] font-bold px-2 py-0.5 rounded-full">
-                {{ acc.status === 'Settled' ? '已結清發放' : '待發放' }}
+              <span :class="(acc.settlementStatus === 'Settled' || acc.status === 'Settled') ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'" class="text-[10px] font-bold px-2 py-0.5 rounded-full">
+                {{ (acc.settlementStatus === 'Settled' || acc.status === 'Settled') ? '已結清發放' : '待發放' }}
               </span>
             </div>
             <p class="text-slate-800">收入 NT${{ Number(acc.actualRevenue).toLocaleString() }} - 場地 NT${{ Number(acc.venueCost).toLocaleString() }} = 酬勞 NT${{ Number(acc.netCoachPool).toLocaleString() }}</p>
@@ -755,7 +755,7 @@
         rawAccounting.value.forEach(acc => {
           const coaches = (acc.coachList || '').split(/[,、]/).map(s => s.trim()).filter(Boolean);
           const payAmount = Number(acc.perCoachPay || 0);
-          const isPaid = acc.status === 'Settled';
+          const isPaid = (acc.settlementStatus === 'Settled' || acc.status === 'Settled');
 
           coaches.forEach(cName => {
             if (!map[cName]) {
