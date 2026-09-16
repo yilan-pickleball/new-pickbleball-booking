@@ -135,12 +135,12 @@
               <label class="font-bold text-slate-700">指派授課教練：</label>
               <span class="text-[11px] text-slate-400">登記意向：{{ parseInterested(req.interestedCoaches).join('、') || '無' }}</span>
             </div>
-            <select 
-              v-model="req.assignedCoach" 
+            <select
+              v-model="req.assignedCoachUid"
               class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-purple-500 focus:outline-none"
             >
               <option value="">-- 請選擇指派教練 --</option>
-              <option v-for="c in approvedCoachesNames" :key="c" :value="c">{{ c }}</option>
+              <option v-for="c in approvedCoachesList" :key="c.coachUid" :value="c.coachUid">{{ coachDisplayName(c) }}</option>
             </select>
           </div>
 
@@ -157,15 +157,15 @@
           </div>
 
           <!-- 衝堂硬阻擋 -->
-          <div v-if="checkConflict(req.assignedCoach, req.preferredDate, req.timeSlot)" class="p-2 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 flex items-center space-x-1.5">
+          <div v-if="checkConflict(req.assignedCoachUid, req.preferredDate, req.timeSlot)" class="p-2 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 flex items-center space-x-1.5">
             <span>⚠️</span>
-            <span><strong>衝堂警告：</strong> {{ req.assignedCoach }} 在 {{ req.preferredDate }} {{ req.timeSlot }} 已有其他正式課程！</span>
+            <span><strong>衝堂警告：</strong> {{ coachNameByUid(req.assignedCoachUid) }} 在 {{ req.preferredDate }} {{ req.timeSlot }} 與既有正式課程有時間重疊；只要重疊 1 分鐘即不可排課。</span>
           </div>
 
           <button 
             @click="confirmMatch(req)"
-            :disabled="!req.assignedCoach || checkConflict(req.assignedCoach, req.preferredDate, req.timeSlot) || isProcessing"
-            :class="(!req.assignedCoach || checkConflict(req.assignedCoach, req.preferredDate, req.timeSlot) || isProcessing) ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-purple-700 hover:bg-purple-800 text-white shadow-md'"
+            :disabled="!req.assignedCoachUid || checkConflict(req.assignedCoachUid, req.preferredDate, req.timeSlot) || isProcessing"
+            :class="(!req.assignedCoachUid || checkConflict(req.assignedCoachUid, req.preferredDate, req.timeSlot) || isProcessing) ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-purple-700 hover:bg-purple-800 text-white shadow-md'"
             class="w-full py-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1"
           >
             <span v-if="isProcessing" class="animate-spin mr-1">🔄</span>
@@ -192,7 +192,7 @@
           <div class="space-y-1">
             <label class="font-bold text-slate-700">課程班型</label>
             <select v-model="proxyForm.courseType" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
-              <option value="初階團體培訓班">初階團體班 (5堂 $1500)</option>
+              <option value="初階團體培訓班">初階團體班 (5堂共 $7500)</option>
               <option value="進階精緻單堂課">進階單堂課 ($1400-$1500)</option>
             </select>
           </div>
@@ -709,14 +709,37 @@
         return rawCoaches.value.filter(c => c.status === 'Approved');
       });
 
+      function normalizeCoachName(name) {
+        return String(name || '')
+          .replace(/\s*[（(]?教練[）)]?\s*/g, '')
+          .trim();
+      }
+
+      function coachDisplayName(coach) {
+        if (!coach) return '教練';
+        const raw = coach.realName || coach.displayName || coach.coachName || '教練';
+        return raw.includes('教練') ? raw : `${raw} 教練`;
+      }
+
+      function findCoachUidByName(name) {
+        const target = normalizeCoachName(name);
+        const found = rawCoaches.value.find(c =>
+          c.status === 'Approved' &&
+          [c.realName, c.displayName, c.coachName].some(n => normalizeCoachName(n) === target)
+        );
+        return found?.coachUid || '';
+      }
+
+      function coachNameByUid(uid) {
+        const found = rawCoaches.value.find(c => c.coachUid === uid);
+        return found ? coachDisplayName(found) : '未識別教練';
+      }
+
+      // 直接回傳 rawRequests 內的 reactive 物件，不要在 computed 中重新 map 出新物件。
+      // 否則下拉選單雖然視覺上會切換，但其他綁定（衝堂警告/確認按鈕）不會同步更新。
       const pendingRequests = computed(() => {
         return rawRequests.value
-          .filter(r => r.status === 'Pending' || r.status === 'Interested')
-          .map(r => ({
-            ...r,
-            assignedCoach: r.assignedCoach || (r.designatedCoach && !r.designatedCoach.includes('不指定') ? r.designatedCoach : ''),
-            assignedVenue: r.assignedVenue || r.venuePreference || '宜蘭國民運動中心'
-          }));
+          .filter(r => r.status === 'Pending' || r.status === 'Interested');
       });
 
       const completedMatches = computed(() => {
@@ -785,13 +808,12 @@
       }
 
       function getTomorrowDate() {
-        const d = new Date();
-        d.setDate(d.getDate() + 1);
-        return d.toISOString().split('T')[0];
-      }
-
-      function toggleAdminStatus() {
-        isAdminApproved.value = !isAdminApproved.value;
+        const taipei = new Date(Date.now() + 8 * 60 * 60 * 1000);
+        taipei.setUTCDate(taipei.getUTCDate() + 1);
+        const y = taipei.getUTCFullYear();
+        const m = String(taipei.getUTCMonth() + 1).padStart(2, '0');
+        const d = String(taipei.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
       }
 
       function parseInterested(raw) {
@@ -804,14 +826,50 @@
         }
       }
 
-      function checkConflict(coachName, date, timeSlot) {
-        if (!coachName) return false;
-        return allMatches.value.some(m => 
-          m.coachNames && m.coachNames.includes(coachName) && 
-          m.lessonDate === date && 
-          m.lessonTime === timeSlot &&
-          m.status === 'Confirmed'
+      function parseTimeRangeMinutes(timeSlot) {
+        const match = String(timeSlot || '').match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);
+        if (!match) return null;
+        return {
+          start: Number(match[1]) * 60 + Number(match[2]),
+          end: Number(match[3]) * 60 + Number(match[4])
+        };
+      }
+
+      function timeRangesOverlap(a, b) {
+        const left = parseTimeRangeMinutes(a);
+        const right = parseTimeRangeMinutes(b);
+        if (!left || !right) return a === b;
+        // 嚴格衝堂：只要有 1 分鐘交集就擋；前一堂結束時間 = 下一堂開始時間則允許。
+        return left.start < right.end && left.end > right.start;
+      }
+
+      function matchHasCoach(match, coachUid) {
+        if (!coachUid) return false;
+        const uidList = String(match.coachUid || match.coachUids || '')
+          .split(/[,、]/).map(v => v.trim()).filter(Boolean);
+        if (uidList.includes(coachUid)) return true;
+
+        // 舊資料尚未寫入 UID 時，以「完整姓名」相容比對，不再使用 includes 子字串判斷。
+        const targetName = normalizeCoachName(coachNameByUid(coachUid));
+        return String(match.coachNames || '')
+          .split(/[,、]/)
+          .map(normalizeCoachName)
+          .includes(targetName);
+      }
+
+      function checkConflict(coachUid, date, timeSlot) {
+        if (!coachUid || !date || !timeSlot) return false;
+        return allMatches.value.some(m =>
+          m.status === 'Confirmed' &&
+          m.lessonDate === date &&
+          matchHasCoach(m, coachUid) &&
+          timeRangesOverlap(m.lessonTime, timeSlot)
         );
+      }
+
+      function expectedFeeForRequest(req) {
+        if (String(req.courseType || '').includes('初階')) return 1500;
+        return Number(req.studentCount || 1) <= 2 ? 1400 : 1500;
       }
 
       function onSelectMatch() {
@@ -830,14 +888,40 @@
       }
 
       async function loadAdminData() {
+        // 保留尚未送出的人工改派草稿，避免按重新整理後又跳回原指定教練。
+        const draftAssignments = new Map(
+          rawRequests.value.map(r => [String(r.reqId || ''), {
+            assignedCoachUid: r.assignedCoachUid || '',
+            assignedVenue: r.assignedVenue || ''
+          }])
+        );
+
         try {
           const res = await fetch(`${GAS_API_URL}?action=getAdminData&uid=${adminProfile.userId}`);
           const data = await res.json();
           if (data.status === 'success') {
             isAdminApproved.value = true;
-            rawRequests.value = data.requests || [];
-            allMatches.value = data.matches || [];
+
+            // 先載入教練名單，後續才能把指定教練姓名正確解析成 UID。
             rawCoaches.value = data.coaches || [];
+
+            rawRequests.value = (data.requests || []).map(r => {
+              const draft = draftAssignments.get(String(r.reqId || ''));
+              const designatedName = r.designatedCoach && !r.designatedCoach.includes('不指定')
+                ? r.designatedCoach
+                : '';
+              const defaultCoachUid = r.assignedCoachUid
+                || r.designatedCoachUid
+                || findCoachUidByName(designatedName);
+
+              return {
+                ...r,
+                assignedCoachUid: draft?.assignedCoachUid || defaultCoachUid || '',
+                assignedVenue: draft?.assignedVenue || r.assignedVenue || r.venuePreference || '宜蘭國民運動中心'
+              };
+            });
+
+            allMatches.value = data.matches || [];
             rawAdmins.value = data.admins || [];
             rawAccounting.value = data.accounting || [];
           } else if (data.status === 'unauthorized') {
@@ -849,8 +933,13 @@
       }
 
       async function confirmMatch(req) {
+        if (checkConflict(req.assignedCoachUid, req.preferredDate, req.timeSlot)) {
+          alert('此教練與既有正式課程有時間重疊，無法排課。');
+          return;
+        }
         isProcessing.value = true;
         try {
+          const assignedCoachName = coachNameByUid(req.assignedCoachUid);
           const payload = {
             action: 'confirmMatch',
             reqId: req.reqId,
@@ -859,10 +948,12 @@
             venue: req.assignedVenue,
             studentUid: req.studentUid,
             studentName: req.studentName,
-            coachNames: req.assignedCoach,
+            coachUid: req.assignedCoachUid,
+            coachNames: assignedCoachName,
             courseType: req.courseType,
-            expectedFee: req.courseType.includes('初階') ? 6000 : 1400,
-            managedBy: adminProfile.name
+            expectedFee: expectedFeeForRequest(req),
+            managedBy: adminProfile.userId,
+            managedByName: adminProfile.name
           };
           const res = await fetch(GAS_API_URL, {
             method: 'POST',
@@ -1167,8 +1258,9 @@
         totalPendingPayout,
         totalPaidPayout,
         formatUid,
-        toggleAdminStatus,
         parseInterested,
+        coachDisplayName,
+        coachNameByUid,
         checkConflict,
         onSelectMatch,
         loadAdminData,
