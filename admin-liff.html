@@ -251,10 +251,13 @@
         </button>
       </div>
 
-      <!-- 正式排程總覽 -->
-      <div class="space-y-3 pt-2">
-        <h2 class="text-sm font-bold text-slate-800">已排程課程總覽 ({{ allMatches.length }})</h2>
-        <div v-for="m in allMatches" :key="m.matId" class="p-3 bg-white border border-slate-200 rounded-xl space-y-2 text-xs">
+      <!-- 正式排程總覽：依台北日期分類，保留原始資料供衝堂與記帳使用 -->
+      <div class="space-y-5 pt-2">
+        <div v-for="group in scheduleGroups" :key="group.key" class="space-y-3">
+          <h2 class="text-sm font-bold" :class="group.key === 'overdue' ? 'text-amber-800' : 'text-slate-800'">{{ group.title }} ({{ group.matches.length }})</h2>
+          <p class="text-xs text-slate-500">{{ group.description }}</p>
+          <p v-if="!group.matches.length" class="p-3 text-xs text-slate-400 bg-slate-50 rounded-xl">{{ group.emptyText }}</p>
+        <div v-for="m in group.matches" :key="m.matId" class="p-3 bg-white border border-slate-200 rounded-xl space-y-2 text-xs">
           <div class="flex justify-between items-center">
             <span class="font-mono font-bold text-purple-700">{{ m.matId }}</span>
             <span 
@@ -285,6 +288,40 @@
             >
               代客取消
             </button>
+          </div>
+        </div>
+        </div>
+        <div class="space-y-3">
+          <h2>
+            <button type="button" @click="historyExpanded = !historyExpanded" :aria-expanded="historyExpanded" aria-controls="schedule-history" class="w-full flex justify-between items-center text-sm font-bold text-slate-800 py-2">
+              <span>📦 歷史／已取消紀錄 ({{ historyMatches.length }})</span>
+              <span>{{ historyExpanded ? '收合 ▲' : '展開 ▼' }}</span>
+            </button>
+          </h2>
+          <div v-if="historyExpanded" id="schedule-history" class="space-y-3">
+            <div class="flex flex-wrap gap-2" role="group" aria-label="歷史紀錄篩選">
+              <button v-for="filter in historyFilters" :key="filter.value" type="button" @click="historyFilter = filter.value" :aria-pressed="historyFilter === filter.value" :class="historyFilter === filter.value ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-slate-600 border-slate-200'" class="px-3 py-1.5 rounded-lg border text-xs font-semibold">{{ filter.label }}</button>
+            </div>
+            <p v-if="!filteredHistoryMatches.length" class="p-3 text-xs text-slate-400 bg-slate-50 rounded-xl">此分類目前沒有紀錄。</p>
+        <div v-for="m in filteredHistoryMatches" :key="m.matId" class="p-3 bg-white border border-slate-200 rounded-xl space-y-2 text-xs">
+          <div class="flex justify-between items-center">
+            <span class="font-mono font-bold text-purple-700">{{ m.matId }}</span>
+            <span 
+              :class="{
+                'bg-amber-100 text-amber-800': m.status === 'Confirmed',
+                'bg-emerald-100 text-emerald-800': m.status === 'Completed',
+                'bg-purple-100 text-purple-800': m.status === 'Settled',
+                'bg-slate-100 text-slate-500 line-through': m.status && m.status.includes('Cancelled')
+              }"
+              class="font-bold px-2 py-0.5 rounded-full text-[10px]"
+            >
+              {{ m.status === 'Confirmed' ? '排定中' : (m.status === 'Completed' ? '教練已簽到完課' : (m.status === 'Settled' ? '💰 已核銷結清' : '已取消')) }}
+            </span>
+          </div>
+          <p class="font-bold text-slate-900">{{ m.studentName }} ↔ {{ m.coachNames }}</p>
+          <p class="text-slate-500">📅 <span class="font-mono">{{ m.lessonDate }} ({{ m.lessonTime }})</span> 📍 {{ m.venue }}</p>
+          
+        </div>
           </div>
         </div>
       </div>
@@ -633,7 +670,7 @@
 </div>
 
 <script>
-  const { createApp, ref, reactive, computed, onMounted } = Vue;
+  const { createApp, ref, reactive, computed, onMounted, onUnmounted } = Vue;
 
   const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwe_Xh7I8iOMDBK278mvBIIeXaVa9B3qz8bl2RfdEFT0elPW9Ff7Vg3p2sHm3COUdfkmA/exec";
   const ADMIN_LIFF_ID = "2011535009-IsC8f5XW";
@@ -660,6 +697,50 @@
 
       const rawRequests = ref([]);
       const allMatches = ref([]);
+
+      // 使用明確時區與固定 YYYY-MM-DD 格式，不受裝置所在地影響。
+      const taipeiDateFormatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit'
+      });
+      function getTaipeiDate(date = new Date()) {
+        const parts = taipeiDateFormatter.formatToParts(date);
+        const part = type => parts.find(p => p.type === type).value;
+        return part('year') + '-' + part('month') + '-' + part('day');
+      }
+      const todayTaipei = ref(getTaipeiDate());
+      function refreshTaipeiDate() { todayTaipei.value = getTaipeiDate(); }
+      let scheduleDateTimer;
+      onMounted(() => {
+        refreshTaipeiDate();
+        scheduleDateTimer = setInterval(refreshTaipeiDate, 1000);
+        document.addEventListener('visibilitychange', refreshTaipeiDate);
+      });
+      onUnmounted(() => {
+        clearInterval(scheduleDateTimer);
+        document.removeEventListener('visibilitychange', refreshTaipeiDate);
+      });
+      const currentMatches = computed(() => allMatches.value.filter(m =>
+        m.status === 'Confirmed' && m.lessonDate >= todayTaipei.value));
+      const overdueMatches = computed(() => allMatches.value.filter(m =>
+        m.status === 'Confirmed' && m.lessonDate < todayTaipei.value));
+      const scheduleGroups = computed(() => [
+        { key: 'current', title: '目前排程', description: '今天起尚待上課的排程（台北時間）。', matches: currentMatches.value, emptyText: '目前沒有待上課的排程。' },
+        { key: 'overdue', title: '⚠️ 待處理逾期課程', description: '上課日期已過，請確認完課或取消。', matches: overdueMatches.value, emptyText: '目前沒有待處理逾期課程。' }
+      ]);
+      const isCancelledMatch = m => typeof m.status === 'string' &&
+        (m.status === 'Cancelled' || m.status.startsWith('Cancelled_'));
+      const historyExpanded = ref(false);
+      const historyFilter = ref('all');
+      const historyFilters = [
+        { value: 'all', label: '全部' }, { value: 'cancelled', label: '已取消' },
+        { value: 'Completed', label: '已完成' }, { value: 'Settled', label: '已核銷' }
+      ];
+      const historyMatches = computed(() => allMatches.value.filter(m =>
+        isCancelledMatch(m) || m.status === 'Completed' || m.status === 'Settled'));
+      const filteredHistoryMatches = computed(() => historyMatches.value.filter(m =>
+        historyFilter.value === 'all' || (historyFilter.value === 'cancelled'
+          ? isCancelledMatch(m) : m.status === historyFilter.value)));
+
       const rawCoaches = ref([]);
       const rawAdmins = ref([]);
       const rawAccounting = ref([]);
@@ -1248,6 +1329,12 @@
         approvedCoachesList,
         pendingRequests,
         allMatches,
+        scheduleGroups,
+        historyExpanded,
+        historyFilter,
+        historyFilters,
+        historyMatches,
+        filteredHistoryMatches,
         completedMatches,
         pendingCoaches,
         pendingAdmins,
