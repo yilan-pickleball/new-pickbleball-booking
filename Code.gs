@@ -1,5 +1,5 @@
 /**
- * 匹克球預約與媒合系統 - 後端核心 RESTful API (Code.gs v2.2)
+ * 匹克球預約與媒合系統 - 後端核心 RESTful API (Code.gs v2.3 - 代課教練與代理簽到)
  * 負責處理全三端 (學員、教練、委員會) 之 GET 讀取與 POST 寫入交易
  * 整合 LockService 防併發衝堂、自動核發單號與財務核算
  */
@@ -109,11 +109,14 @@ function doPost(e) {
       case 'adminCancelBooking':
         result = handleAdminCancelBooking(payload);
         break;
+      case 'getSubstituteLessons':
+        result = handleGetSubstituteLessons(payload);
+        break;
+      case 'assignSubstitute':
+        result = handleAssignSubstitute(payload);
+        break;
       case 'adminProxyRequest':
         result = handleSubmitStudentRequest(payload, true);
-        break;
-      case 'approveCoach':
-        result = handleApproveCoach(payload);
         break;
       case 'rejectCoach': // ⭐ 新增這兩行
         result = handleRejectCoach(payload);
@@ -205,7 +208,7 @@ function handleGetCoachData(coachUid) {
   const matRows = getRowsData(matSheet);
   const coachName = coachInfo ? coachInfo.realName : '';
   const myLessons = matRows.filter(m => {
-    return m.coachNames && (m.coachNames.includes(coachName) || m.coachNames.includes(coachUid));
+    return !isSubstituteLesson(m) && m.coachNames && ((coachName && m.coachNames.includes(coachName)) || (coachUid && String(m.coachUid || '').split(/[,、]/).includes(coachUid)));
   });
 
   // 4. 我的釋出空檔 (Slots_SLOT)
@@ -257,7 +260,7 @@ function handleGetAdminData(adminUid) {
     slots: getRowsData(slotSheet),
     matches: getRowsData(matSheet),
     accounting: getRowsData(accSheet),
-    coaches: getRowsData(coachSheet),
+    coaches: getRowsData(coachSheet).concat(SUBSTITUTE_COACHES),
     admins: admins,
     config: config
   };
@@ -268,7 +271,7 @@ function handleGetAdminData(adminUid) {
 // ==========================================
 
 // 學員提單 (含長輩代客提單)
-function handleSubmitStudentRequest(p, isProxy) {
+function handleSubmitStudentRequestOriginal(p, isProxy) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const config = getConfigMap();
   const studentUid = p.studentUid;
@@ -382,113 +385,9 @@ function handleExpressCoachInterest(p) {
 }
 
 // 委員會確認撮合 (二次防衝堂檢核)
-function handleConfirmMatch(p) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const matSheet = ss.getSheetByName('Matches_MAT');
-  const matRows = getRowsData(matSheet);
 
-  // 1. 執行後端防衝堂比對
-  const assignedCoaches = p.coachNames.split(',').map(s => s.trim());
-  const conflict = matRows.find(m => {
-    if (m.status !== 'Confirmed') return false;
-    if (m.lessonDate === p.lessonDate && m.lessonTime === p.lessonTime) {
-      return assignedCoaches.some(c => m.coachNames.includes(c));
-    }
-    return false;
-  });
 
-  if (conflict) {
-    return {
-      status: 'error',
-      message: `衝堂警告！教練名冊在 ${p.lessonDate} ${p.lessonTime} 已有正式排程 (${conflict.matId})，禁止重複排課！`
-    };
-  }
 
-  // 2. 核發 MAT- 媒合單號
-  const matId = generateSequenceId('MAT');
-  matSheet.appendRow([
-    matId,
-    p.reqId || '',
-    p.lessonDate,
-    p.lessonTime,
-    p.venue,
-    p.studentUid,
-    p.studentName,
-    p.coachNames,
-    p.courseType,
-    p.expectedFee || 0,
-    'Confirmed',
-    p.managedBy
-  ]);
-
-  // 3. 同步將來源需求標記為 Confirmed
-  if (p.reqId) {
-    updateRowStatus(ss.getSheetByName('Requests_REQ'), 'reqId', p.reqId, 'Confirmed');
-  }
-
-  // 4. 若有關聯空檔單，標記為 Matched
-  if (p.slotId) {
-    updateRowStatus(ss.getSheetByName('Slots_SLOT'), 'slotId', p.slotId, 'Matched');
-  }
-
-  return { status: 'success', matId: matId };
-}
-
-// 教練完課簽到回報
-function handleCoachCompleteLesson(p) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const matSheet = ss.getSheetByName('Matches_MAT');
-  const data = matSheet.getDataRange().getValues();
-
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === p.matId) {
-      matSheet.getRange(i + 1, 10).setValue(p.actualRevenue); // 更新實收金額
-      matSheet.getRange(i + 1, 11).setValue('Completed');     // 標記完課
-      if (p.coachNames) {
-        matSheet.getRange(i + 1, 8).setValue(p.coachNames);   // 更新出勤教練清單
-      }
-      return { status: 'success', message: '已完成完課簽到，等待委員會均分核銷！' };
-    }
-  }
-
-  return { status: 'error', message: '找不到對應的媒合排程單號' };
-}
-
-// 委員會課堂收支均分核銷 (生成 ACC- 傳票)
-function handleSettleLessonAccounting(p) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const actualRevenue = parseFloat(p.actualRevenue || '0');
-  const venueCost = parseFloat(p.venueCost || '0');
-  const coachCount = parseInt(p.coachCount || '1');
-
-  // 計算可分配酬勞與均分款
-  const netCoachPool = actualRevenue - venueCost;
-  const perCoachPay = Math.round(netCoachPool / coachCount);
-
-  const accId = generateSequenceId('ACC');
-  const accSheet = ss.getSheetByName('Accounting_ACC');
-
-  accSheet.appendRow([
-    accId,
-    p.matId,
-    p.lessonDate,
-    actualRevenue,
-    venueCost,
-    netCoachPool,
-    coachCount,
-    perCoachPay,
-    p.coachList,
-    'Unsettled', // 薪酬發放初始狀態為待結算發放
-    p.settledBy
-  ]);
-
-  // 同步 Matches_MAT 為 Settled
-  updateRowStatus(ss.getSheetByName('Matches_MAT'), 'matId', p.matId, 'Settled');
-
-  return { status: 'success', accId: accId, perCoachPay: perCoachPay };
-}
-
-// 委員會教練薪資發放結清標記（安全修正版）
 function handleUpdatePayrollStatus(p) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const accSheet = ss.getSheetByName('Accounting_ACC');
@@ -694,4 +593,238 @@ function getConfigMap() {
 function createJsonResponse(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+
+// 代課選項僅供委員會指派，不建立可登入的假 LINE 帳號。
+const SUBSTITUTE_COACHES = [
+  { coachUid: 'SUB_COACH_1', realName: '代課教練一號', displayName: '代課教練一號', status: 'Approved', isSubstitute: true },
+  { coachUid: 'SUB_COACH_2', realName: '代課教練二號', displayName: '代課教練二號', status: 'Approved', isSubstitute: true }
+];
+const SUBSTITUTE_DELEGATES = ['Ud471b1a7217b649b3599b54700d352c9', 'U24533fdb919248f20b70d39f89f237c1'];
+
+function substituteOption(value) {
+  return SUBSTITUTE_COACHES.find(c => c.coachUid === value || c.realName === value);
+}
+function isSubstituteLesson(m) {
+  return !!(substituteOption(m.coachUid) || substituteOption(m.coachNames));
+}
+function verifiedLineActor(p) {
+  if (!p.accessToken || typeof p.accessToken !== 'string') throw new Error('請由 LINE 登入後再操作。');
+  const response = UrlFetchApp.fetch('https://api.line.me/v2/profile', {
+    headers: { Authorization: 'Bearer ' + p.accessToken }, muteHttpExceptions: true
+  });
+  if (response.getResponseCode() !== 200) throw new Error('LINE 登入已失效，請關閉頁面並重新登入。');
+  const profile = JSON.parse(response.getContentText());
+  if (!profile.userId) throw new Error('無法驗證 LINE 身分。');
+  return profile;
+}
+function requireSubstituteDelegate(p) {
+  const actor = verifiedLineActor(p);
+  if (!SUBSTITUTE_DELEGATES.includes(actor.userId)) throw new Error('僅杜和益或黃嘉文可協助代課簽到。');
+  return actor;
+}
+function requireVerifiedAdmin(p) {
+  const actor = verifiedLineActor(p);
+  const config = getConfigMap();
+  const admins = getRowsData(SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Admins'));
+  if (actor.userId !== config.INITIAL_SUPER_ADMIN && !admins.some(a => a.adminUid === actor.userId && a.status === 'Approved')) {
+    throw new Error('需要委員會管理員權限。');
+  }
+  return actor;
+}
+function headerKeys(sheet) {
+  return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => {
+    const s = String(h).trim();
+    const match = s.match(/\(([^)]+)\)/);
+    return match ? match[1] : s;
+  });
+}
+function ensureFields(sheet, fields) {
+  const headers = headerKeys(sheet);
+  const missing = fields.filter(f => !headers.includes(f));
+  if (missing.length) {
+    const needed = headers.length + missing.length;
+    if (needed > sheet.getMaxColumns()) sheet.insertColumnsAfter(sheet.getMaxColumns(), needed - sheet.getMaxColumns());
+    sheet.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]);
+  }
+  return headers.concat(missing);
+}
+function safeCell(value) {
+  return typeof value === 'string' && /^[=+@-]/.test(value) ? "'" + value : value;
+}
+function appendFields(sheet, values) {
+  const headers = ensureFields(sheet, Object.keys(values));
+  sheet.appendRow(headers.map(h => safeCell(values[h] === undefined ? '' : values[h])));
+}
+function updateFields(sheet, idKey, id, values) {
+  const row = getRowIndex(sheet, idKey, id);
+  if (row < 2) throw new Error('找不到單號：' + id);
+  const headers = ensureFields(sheet, Object.keys(values));
+  Object.keys(values).forEach(key => sheet.getRange(row, headers.indexOf(key) + 1).setValue(safeCell(values[key])));
+}
+function requiredSubstituteName(value) {
+  const name = String(value || '').trim();
+  if (!name || name.length > 80 || /[,、\r\n]/.test(name) || substituteOption(name)) {
+    throw new Error('請填寫一位實際代課教練姓名（80 字內，不使用逗號或頓號）。');
+  }
+  return name;
+}
+function lessonNotes(value) {
+  const notes = String(value || '').trim();
+  if (notes.length > 1000) throw new Error('備註請控制在 1000 字內。');
+  return notes;
+}
+function moneyValue(value, label) {
+  if (value === '' || value === null || value === undefined || !Number.isFinite(Number(value)) || Number(value) < 0) {
+    throw new Error(label + '須填寫零或正數。');
+  }
+  return Number(value);
+}
+function lessonWindow(value) {
+  const match = String(value || '').match(/^(\d{1,2}):(\d{2})\s*[-~～–—]\s*(\d{1,2}):(\d{2})$/);
+  if (!match) throw new Error('課程時段格式不正確。');
+  const nums = match.slice(1).map(Number);
+  const start = nums[0] * 60 + nums[1], end = nums[2] * 60 + nums[3];
+  if (nums[0] > 23 || nums[2] > 23 || nums[1] > 59 || nums[3] > 59 || start >= end) throw new Error('課程起訖時間不正確。');
+  return [start, end];
+}
+function checkAssignmentConflict(rows, proposed, excludedId) {
+  const window = lessonWindow(proposed.lessonTime);
+  const normalize = s => String(s || '').replace(/教練/g, '').replace(/\s/g, '');
+  const proposedNames = String(proposed.substituteCoachName || proposed.coachNames || '').split(/[,、]/).map(normalize).filter(Boolean);
+  const conflict = rows.find(m => {
+    if (m.matId === excludedId || m.status !== 'Confirmed' || m.lessonDate !== proposed.lessonDate) return false;
+    const uids = String(m.coachUid || '').split(/[,、]/);
+    const names = String(m.substituteCoachName || m.coachNames || '').split(/[,、]/).map(normalize);
+    if (!(proposed.coachUid && uids.includes(proposed.coachUid)) && !proposedNames.some(n => names.includes(n)) && m.coachNames !== proposed.coachNames) return false;
+    const existing = lessonWindow(m.lessonTime);
+    return window[0] < existing[1] && existing[0] < window[1];
+  });
+  if (conflict) throw new Error('教練或代課名額與 ' + conflict.matId + ' 時段重疊，請改派其他教練或調整時間。');
+}
+function handleGetSubstituteLessons(p) {
+  const actor = requireSubstituteDelegate(p);
+  const lessons = getRowsData(SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Matches_MAT'))
+    .filter(m => isSubstituteLesson(m) && m.status === 'Confirmed');
+  return { status: 'success', lessons: lessons, delegateUid: actor.userId };
+}
+function handleAssignSubstitute(p) {
+  const actor = requireVerifiedAdmin(p);
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Matches_MAT');
+  const rows = getRowsData(sheet);
+  const match = rows.find(m => m.matId === p.matId);
+  if (!match || match.status !== 'Confirmed') throw new Error('僅能改派尚未完課的正式課程。');
+  const option = substituteOption(p.coachUid);
+  if (!option) throw new Error('請選擇代課教練一號或二號。');
+  const changes = {
+    coachUid: option.coachUid, coachNames: option.realName,
+    substituteCoachName: requiredSubstituteName(p.substituteCoachName), notes: lessonNotes(p.notes),
+    substituteAssignedBy: actor.userId, substituteAssignedAt: new Date().toISOString()
+  };
+  checkAssignmentConflict(rows, Object.assign({}, match, changes), match.matId);
+  if (!match.originalCoachNames) changes.originalCoachNames = match.coachNames;
+  if (!match.originalCoachUid) changes.originalCoachUid = match.coachUid || '';
+  updateFields(sheet, 'matId', match.matId, changes);
+  return { status: 'success', message: '已保存代課安排。' };
+}
+
+function handleSubmitStudentRequest(p, isProxy) {
+  const option = substituteOption(p.designatedCoachUid) || substituteOption(p.designatedCoach);
+  let name = '';
+  if (option) {
+    if (!isProxy) throw new Error('代課教練由委員會安排。');
+    const actor = requireVerifiedAdmin(p);
+    p.proxyAdminUid = actor.userId;
+    p.designatedCoach = option.realName;
+    p.designatedCoachUid = option.coachUid;
+    name = requiredSubstituteName(p.substituteCoachName);
+  }
+  p.notes = safeCell(lessonNotes(p.notes));
+  const result = handleSubmitStudentRequestOriginal(p, isProxy);
+  if (result.status === 'success') {
+    updateFields(SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Requests_REQ'), 'reqId', result.reqId, {
+      designatedCoachUid: p.designatedCoachUid || '', substituteCoachName: name
+    });
+  }
+  return result;
+}
+
+function handleConfirmMatch(p) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Matches_MAT');
+  const rows = getRowsData(sheet);
+  const request = getRowsData(ss.getSheetByName('Requests_REQ')).find(r => r.reqId === p.reqId);
+  if (p.reqId && (!request || !['Pending', 'Interested'].includes(request.status) || rows.some(m => m.reqId === p.reqId && !String(m.status).startsWith('Cancelled')))) {
+    throw new Error('需求單已處理或不存在，請重新整理。');
+  }
+  const option = substituteOption(p.coachUid) || substituteOption(p.coachNames);
+  const actor = option ? requireVerifiedAdmin(p) : null;
+  const record = {
+    reqId: p.reqId || '', lessonDate: p.lessonDate, lessonTime: p.lessonTime, venue: p.venue,
+    studentUid: p.studentUid, studentName: p.studentName,
+    coachUid: option ? option.coachUid : (p.coachUid || ''), coachNames: option ? option.realName : p.coachNames,
+    courseType: p.courseType, expectedFee: moneyValue(p.expectedFee, '預估學費'), status: 'Confirmed',
+    managedBy: actor ? actor.userId : p.managedBy,
+    substituteCoachName: option ? requiredSubstituteName(p.substituteCoachName || (request && request.substituteCoachName)) : '',
+    notes: lessonNotes(p.notes === undefined ? (request && request.notes) : p.notes)
+  };
+  checkAssignmentConflict(rows, record);
+  record.matId = generateSequenceId('MAT');
+  appendFields(sheet, record);
+  if (p.reqId) updateRowStatus(ss.getSheetByName('Requests_REQ'), 'reqId', p.reqId, 'Confirmed');
+  if (p.slotId) updateRowStatus(ss.getSheetByName('Slots_SLOT'), 'slotId', p.slotId, 'Matched');
+  return { status: 'success', matId: record.matId };
+}
+
+function handleCoachCompleteLesson(p) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Matches_MAT');
+  const match = getRowsData(sheet).find(m => m.matId === p.matId);
+  if (!match || match.status !== 'Confirmed') throw new Error('課程不存在或已處理，請重新整理。');
+  // 代課路徑無論從哪個頁面呼叫，都需驗證指定兩位代理人的 LINE 身分。
+  const actor = isSubstituteLesson(match) ? requireSubstituteDelegate(p) : verifiedLineActor(p);
+  if (!isSubstituteLesson(match)) {
+    const config = getConfigMap();
+    const admins = getRowsData(ss.getSheetByName('Admins'));
+    const coach = getRowsData(ss.getSheetByName('Coaches')).find(c => c.coachUid === actor.userId && c.status === 'Approved');
+    const assigned = String(match.coachUid || '').split(/[,、]/).includes(actor.userId) ||
+      (!match.coachUid && coach && String(match.coachNames || '').split(/[,、]/).some(n => n.replace(/\s*教練\s*/g, '').trim() === String(coach.realName || '').replace(/\s*教練\s*/g, '').trim()));
+    if (!assigned && actor.userId !== config.INITIAL_SUPER_ADMIN && !admins.some(a => a.adminUid === actor.userId && a.status === 'Approved')) throw new Error('無此課程簽到權限。');
+  }
+  if (isSubstituteLesson(match)) requiredSubstituteName(match.substituteCoachName);
+  const revenue = moneyValue(p.reportedRevenue === undefined ? p.actualRevenue : p.reportedRevenue, '回報實收');
+  updateFields(sheet, 'matId', match.matId, {
+    reportedRevenue: revenue, attendance: lessonNotes(p.attendance || '全員到課'), completionNotes: lessonNotes(p.notes),
+    completedBy: actor.userId, completedByName: actor.displayName || '', completedAt: new Date().toISOString(), status: 'Completed'
+  });
+  return { status: 'success', message: '已完成簽到，等待委員會核對實收與核銷。' };
+}
+
+function handleSettleLessonAccounting(p) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const matSheet = ss.getSheetByName('Matches_MAT');
+  const match = getRowsData(matSheet).find(m => m.matId === p.matId);
+  const accSheet = ss.getSheetByName('Accounting_ACC');
+  if (!match || match.status !== 'Completed' || getRowsData(accSheet).some(a => a.matId === p.matId)) throw new Error('課程尚未完課或已核銷，請重新整理。');
+  const actor = isSubstituteLesson(match) ? requireVerifiedAdmin(p) : null;
+  const actualRevenue = moneyValue(p.actualRevenue, '實收學費');
+  const venueCost = moneyValue(p.venueCost, '場地費');
+  const substituteName = isSubstituteLesson(match) ? requiredSubstituteName(match.substituteCoachName) : '';
+  const coachList = substituteName || match.coachNames;
+  const coachCount = String(coachList || '').split(/[,、]/).filter(s => s.trim()).length;
+  if (!coachCount || Number(p.coachCount) !== coachCount) throw new Error('出勤人數與課程教練名單不一致，請先核對名單。');
+  const netCoachPool = Math.max(0, actualRevenue - venueCost);
+  const perCoachPay = Math.round(netCoachPool / coachCount);
+  const accId = generateSequenceId('ACC');
+  appendFields(accSheet, {
+    accId: accId, matId: match.matId, lessonDate: match.lessonDate, actualRevenue: actualRevenue,
+    venueCost: venueCost, netCoachPool: netCoachPool, coachCount: coachCount, perCoachPay: perCoachPay,
+    coachList: coachList, settlementStatus: 'Unsettled', settledBy: actor ? actor.userId : p.settledBy,
+    substituteSlot: substituteName ? match.coachNames : '', substituteCoachName: substituteName,
+    notes: match.notes || '', reportedRevenue: match.reportedRevenue === undefined ? '' : match.reportedRevenue,
+    attendance: match.attendance || '', completionNotes: match.completionNotes || '', completedBy: match.completedBy || ''
+  });
+  updateFields(matSheet, 'matId', match.matId, { actualRevenue: actualRevenue, status: 'Settled' });
+  return { status: 'success', accId: accId, perCoachPay: perCoachPay };
 }
