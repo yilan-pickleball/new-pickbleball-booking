@@ -339,6 +339,22 @@
 
   </main>
 
+  <section v-if="canDelegateCheckin" class="max-w-md mx-auto px-4 pb-24 space-y-3">
+    <h2 class="font-bold text-slate-900">代課教練授課簽到</h2>
+    <p class="text-xs text-slate-500">由杜和益或黃嘉文協助回報；酬勞歸屬實際代課老師。</p>
+    <button @click="loadSubstituteLessons" class="text-xs text-blue-700 underline">重新整理代課課表</button>
+    <p v-if="substituteLoadError" class="text-xs text-red-600">{{ substituteLoadError }}</p>
+    <p v-else-if="!substituteLessons.length" class="text-xs text-slate-500">目前沒有待簽到的代課課程。</p>
+    <div v-for="m in substituteLessons" :key="m.matId" class="p-4 border border-purple-200 rounded-xl bg-white space-y-2 text-xs">
+      <p class="font-bold">{{ m.coachNames }}：{{ m.substituteCoachName }}</p>
+      <p>{{ m.lessonDate }} {{ m.lessonTime }} · {{ m.venue }}</p>
+      <p>{{ m.studentName }} · {{ m.matId }}</p>
+      <p v-if="m.notes" class="whitespace-pre-wrap">備註：{{ m.notes }}</p>
+      <button @click="openCheckinModal(m)" class="w-full py-2 rounded-lg bg-emerald-600 text-white font-bold">協助授課簽到</button>
+    </div>
+  </section>
+
+
   <div v-if="checkinModal.show" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl p-5 max-w-sm w-full shadow-2xl space-y-4">
       <div class="text-center">
@@ -356,24 +372,40 @@
       </div>
 
       <div class="space-y-3 text-xs">
-        <div>
-          <label class="font-bold text-slate-700 block mb-1">現場實收現金學費 (NT$) <span class="text-red-500">*</span></label>
-          <input 
-            type="number" 
-            v-model.number="checkinModal.actualRevenue" 
-            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold text-emerald-700 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-          >
-          <p class="text-[10px] text-slate-400 mt-1">現場向學員收受之總現金金額</p>
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-blue-900 space-y-1">
+          <p>👥 系統指派教練：<strong>{{ checkinModal.assignedCoachNames }}</strong></p>
+          <p>💰 系統預估課程金額：<strong>NT$ {{ Number(checkinModal.targetMatch?.expectedFee || 0).toLocaleString() }}</strong></p>
+          <p class="text-[10px] text-blue-700">教練端不修改正式教練名單與會計金額；最終帳務由委員會確認。</p>
         </div>
 
         <div>
-          <label class="font-bold text-slate-700 block mb-1">共同執教教練名單備註</label>
-          <input 
-            type="text" 
-            v-model="checkinModal.coachNames" 
-            placeholder="例如：杜和益, 王教練" 
-            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          <label class="font-bold text-slate-700 block mb-1">教練回報現場實收 (NT$)</label>
+          <input
+            type="number"
+            min="0"
+            v-model.number="checkinModal.reportedRevenue"
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold text-emerald-700 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
           >
+          <p class="text-[10px] text-slate-400 mt-1">此欄為回報值 reportedRevenue，正式 actualRevenue 由委員會核對。</p>
+        </div>
+
+        <div>
+          <label class="font-bold text-slate-700 block mb-1">出席狀況</label>
+          <select v-model="checkinModal.attendance" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
+            <option value="全員到課">全員到課</option>
+            <option value="部分到課">部分到課</option>
+            <option value="未到課/其他">未到課／其他</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="font-bold text-slate-700 block mb-1">完課備註</label>
+          <textarea
+            v-model="checkinModal.notes"
+            rows="2"
+            placeholder="例如：實際出席人數、延後開課、特殊狀況..."
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          ></textarea>
         </div>
       </div>
 
@@ -450,8 +482,8 @@
       const isCheckingIn = ref(false);
 
       const userProfile = reactive({
-        userId: 'Ud471b1a7217b649b3599b54700d352c9',
-        name: '杜和益 (教練)'
+        userId: '',
+        name: '尚未登入'
       });
 
       const applyForm = reactive({
@@ -492,32 +524,55 @@
       const mySlots = ref([]);
       const studentRequests = ref([]);
       const myMatches = ref([]);
+      const canDelegateCheckin = computed(() => ['Ud471b1a7217b649b3599b54700d352c9', 'U24533fdb919248f20b70d39f89f237c1'].includes(userProfile.userId));
+      const substituteLessons = ref([]);
+      const substituteLoadError = ref('');
+      function lineAccessToken() {
+        return typeof liff !== 'undefined' && liff.isLoggedIn() ? liff.getAccessToken() : '';
+      }
+      async function loadSubstituteLessons() {
+        substituteLessons.value = [];
+        substituteLoadError.value = '';
+        if (!canDelegateCheckin.value) return;
+        try {
+          const res = await fetch(GAS_API_URL, {
+            method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'getSubstituteLessons', accessToken: lineAccessToken() })
+          });
+          const data = await res.json();
+          if (data.status !== 'success') throw new Error(data.message || '無法讀取代課課表。');
+          substituteLessons.value = data.lessons || [];
+        } catch (err) { substituteLoadError.value = err.message; }
+      }
 
       const checkinModal = reactive({
         show: false,
         targetMatch: null,
-        actualRevenue: 1400,
-        coachNames: ''
+        reportedRevenue: 0,
+        assignedCoachNames: '',
+        attendance: '全員到課',
+        notes: ''
       });
+
+      const serverNowMs = ref(null);
 
       const cleanCoachName = computed(() => {
         return userProfile.name.replace(/ \(教練\)/g, '').replace(/ \(學員\)/g, '').trim();
       });
 
       function getTomorrowDate() {
-        const d = new Date();
-        d.setDate(d.getDate() + 1);
-        return d.toISOString().split('T')[0];
+        const taipei = new Date(Date.now() + 8 * 60 * 60 * 1000);
+        taipei.setUTCDate(taipei.getUTCDate() + 1);
+        const y = taipei.getUTCFullYear();
+        const m = String(taipei.getUTCMonth() + 1).padStart(2, '0');
+        const d = String(taipei.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
       }
 
       const minDate = computed(() => getTomorrowDate());
 
       function formatUid(uid) {
         return uid ? uid.substring(0, 8) + '...' + uid.slice(-4) : '';
-      }
-
-      function toggleApprovalStatus() {
-        isApproved.value = !isApproved.value;
       }
 
       function parseInterested(raw) {
@@ -531,13 +586,17 @@
       }
 
       function isLockedByOther(req) {
-        if (!req.designatedCoach || req.designatedCoach.includes('不指定')) return false;
-        if (req.designatedCoach.includes(cleanCoachName.value)) return false;
-        
+        const designatedUid = req.designatedCoachUid || '';
+        const designatedName = req.designatedCoach || '';
+        if ((!designatedUid && !designatedName) || designatedName.includes('不指定')) return false;
+        if (designatedUid && designatedUid === userProfile.userId) return false;
+        if (!designatedUid && designatedName.includes(cleanCoachName.value)) return false;
+
         if (!req.createdAt) return true;
-        const created = new Date(req.createdAt.replace(/-/g, '/'));
-        const now = new Date();
-        const diffHours = (now - created) / (1000 * 60 * 60);
+        const created = new Date(req.createdAt);
+        if (Number.isNaN(created.getTime())) return true;
+        const nowMs = serverNowMs.value || Date.now();
+        const diffHours = (nowMs - created.getTime()) / (1000 * 60 * 60);
         return diffHours < 24;
       }
 
@@ -547,6 +606,10 @@
           const data = await res.json();
           if (data.status === 'success') {
             isApproved.value = data.isApproved;
+            if (data.serverNow) {
+              const parsedServerNow = new Date(data.serverNow).getTime();
+              if (!Number.isNaN(parsedServerNow)) serverNowMs.value = parsedServerNow;
+            }
             studentRequests.value = data.poolRequests || [];
             myMatches.value = data.myLessons || [];
             mySlots.value = data.mySlots || [];
@@ -618,6 +681,7 @@
           const payload = {
             action: 'expressCoachInterest',
             reqId: req.reqId,
+            coachUid: userProfile.userId,
             coachName: cleanCoachName.value
           };
           const res = await fetch(GAS_API_URL, {
@@ -639,20 +703,29 @@
 
       function openCheckinModal(match) {
         checkinModal.targetMatch = match;
-        checkinModal.actualRevenue = Number(match.expectedFee) || 1400;
-        checkinModal.coachNames = match.coachNames || cleanCoachName.value;
+        checkinModal.reportedRevenue = Number(match.expectedFee) || 0;
+        checkinModal.assignedCoachNames = match.substituteCoachName ? match.coachNames + '：' + match.substituteCoachName : (match.coachNames || cleanCoachName.value);
+        checkinModal.attendance = '全員到課';
+        checkinModal.notes = '';
         checkinModal.show = true;
       }
 
       async function submitCheckin() {
-        if (!checkinModal.targetMatch) return;
+        if (!checkinModal.targetMatch || isCheckingIn.value) return;
+        if (checkinModal.reportedRevenue === '' || !Number.isFinite(Number(checkinModal.reportedRevenue)) || Number(checkinModal.reportedRevenue) < 0) { alert('請填寫零或正數的實收金額。'); return; }
         isCheckingIn.value = true;
         try {
           const payload = {
             action: 'coachCompleteLesson',
+            accessToken: lineAccessToken(),
             matId: checkinModal.targetMatch.matId,
-            actualRevenue: checkinModal.actualRevenue,
-            coachNames: checkinModal.coachNames
+            coachUid: userProfile.userId,
+            reportedRevenue: Number(checkinModal.reportedRevenue || 0),
+            attendance: checkinModal.attendance,
+            notes: checkinModal.notes,
+            // 舊版 GAS 相容欄位：畫面不允許教練修改正式教練名單；actualRevenue 最終仍應由委員會後台確認。
+            actualRevenue: Number(checkinModal.reportedRevenue || 0),
+            coachNames: checkinModal.assignedCoachNames
           };
           const res = await fetch(GAS_API_URL, {
             method: 'POST',
@@ -664,6 +737,7 @@
             alert('完課簽到成功！資料已同步至委員會後台等待核銷記帳。');
             checkinModal.show = false;
             await loadCoachData();
+            await loadSubstituteLessons();
           } else {
             alert('簽到失敗：' + result.message);
           }
@@ -703,10 +777,12 @@
             userProfile.userId = profile.userId;
             userProfile.name = profile.displayName + ' (教練)';
           } catch (e) {
-            console.warn('教練 LIFF 初始化異常，使用預設身分:', e);
+            userProfile.userId = '';
+            console.warn('教練 LIFF 初始化異常:', e);
           }
         }
         await loadCoachData();
+        await loadSubstituteLessons();
       });
 
       return {
@@ -722,6 +798,7 @@
         mySlots,
         studentRequests,
         myMatches,
+        canDelegateCheckin, substituteLessons, substituteLoadError, loadSubstituteLessons,
         checkinModal,
         minDate,
         isPublishing,
@@ -729,7 +806,6 @@
         isCheckingIn,
         cleanCoachName,
         formatUid,
-        toggleApprovalStatus,
         parseInterested,
         isLockedByOther,
         loadCoachData,
