@@ -156,6 +156,15 @@
             </select>
           </div>
 
+          <div v-if="isSubstituteChoice(req.assignedCoachUid)" class="space-y-1.5">
+            <label class="text-xs font-bold text-slate-700">實際代課教練姓名 *</label>
+            <input v-model.trim="req.substituteCoachName" maxlength="80" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="必填：這堂課實際授課老師">
+          </div>
+          <div class="space-y-1.5">
+            <label class="text-xs font-bold text-slate-700">課程備註</label>
+            <textarea v-model="req.notes" maxlength="1000" rows="2" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"></textarea>
+          </div>
+
           <!-- 衝堂硬阻擋 -->
           <div v-if="checkConflict(req.assignedCoachUid, req.preferredDate, req.timeSlot)" class="p-2 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 flex items-center space-x-1.5">
             <span>⚠️</span>
@@ -192,7 +201,7 @@
           <div class="space-y-1">
             <label class="font-bold text-slate-700">課程班型</label>
             <select v-model="proxyForm.courseType" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
-              <option value="初階團體培訓班">初階團體班 (5堂共 $7500)</option>
+              <option value="初階團體培訓班">初階團體班 (每人5堂共 $1500)</option>
               <option value="進階精緻單堂課">進階單堂課 ($1400-$1500)</option>
             </select>
           </div>
@@ -241,6 +250,15 @@
           </select>
         </div>
 
+
+        <div v-if="isSubstituteChoice(proxyForm.designatedCoach)" class="space-y-1">
+          <label class="text-xs font-bold text-slate-700">實際代課教練姓名 *</label>
+          <input v-model.trim="proxyForm.substituteCoachName" maxlength="80" placeholder="填寫這堂課實際授課老師" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
+        </div>
+        <div class="space-y-1">
+          <label class="text-xs font-bold text-slate-700">課程備註</label>
+          <textarea v-model="proxyForm.notes" maxlength="1000" rows="2" placeholder="例如：代課安排、聯絡方式或特殊事項" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"></textarea>
+        </div>
         <button 
           @click="submitProxyBooking" 
           :disabled="isProcessing"
@@ -250,6 +268,10 @@
           <span>建立代客預約需求 (寫入 REQ-)</span>
         </button>
       </div>
+
+      <p v-if="proxyForm.courseType.includes('初階')" class="text-xs text-purple-700 bg-purple-50 p-3 rounded-lg">
+        每人 5 堂共 NT$1,500（每人每堂 NT$300）。{{ proxyForm.studentCount }} 人班每堂合計 NT$ {{ (Number(proxyForm.studentCount || 0) * 300).toLocaleString() }}，5 堂合計 NT$ {{ (Number(proxyForm.studentCount || 0) * 1500).toLocaleString() }}。
+      </p>
 
       <!-- 正式排程總覽：依台北日期分類，保留原始資料供衝堂與記帳使用 -->
       <div class="space-y-5 pt-2">
@@ -273,11 +295,16 @@
             </span>
           </div>
           <p class="font-bold text-slate-900">{{ m.studentName }} ↔ {{ m.coachNames }}</p>
+          <p v-if="m.substituteCoachName" class="text-purple-700 font-bold">實際代課：{{ m.substituteCoachName }}</p>
+          <p v-if="m.notes" class="text-slate-500 whitespace-pre-wrap">備註：{{ m.notes }}</p>
+          <p v-if="m.completedBy" class="text-slate-500">簽到人：{{ m.completedByName || m.completedBy }}</p>
           <p class="text-slate-500">📅 <span class="font-mono">{{ m.lessonDate }} ({{ m.lessonTime }})</span> 📍 {{ m.venue }}</p>
           
+          <button v-if="m.status === 'Confirmed'" @click="openSubstituteEditor(m)" class="text-xs px-3 py-1.5 rounded border border-purple-200 text-purple-700">安排／修改代課與備註</button>
           <div v-if="m.status === 'Confirmed'" class="pt-1 flex space-x-2">
             <button 
               @click="markCompletedAdmin(m)"
+              :disabled="isProcessing || (isSubstituteChoice(m.coachUid || m.coachNames) && !canDelegateCheckin)"
               class="flex-1 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded font-semibold border border-emerald-200"
             >
               代為標註完課
@@ -319,6 +346,9 @@
             </span>
           </div>
           <p class="font-bold text-slate-900">{{ m.studentName }} ↔ {{ m.coachNames }}</p>
+          <p v-if="m.substituteCoachName" class="text-purple-700 font-bold">實際代課：{{ m.substituteCoachName }}</p>
+          <p v-if="m.notes" class="text-slate-500 whitespace-pre-wrap">備註：{{ m.notes }}</p>
+          <p v-if="m.completedBy" class="text-slate-500">簽到人：{{ m.completedByName || m.completedBy }}</p>
           <p class="text-slate-500">📅 <span class="font-mono">{{ m.lessonDate }} ({{ m.lessonTime }})</span> 📍 {{ m.venue }}</p>
           
         </div>
@@ -469,6 +499,8 @@
           <div v-if="currentSelectedMatch" class="p-2.5 bg-purple-50/70 border border-purple-200 rounded-lg space-y-1 text-slate-700">
             <p>🏸 課程：<strong>{{ currentSelectedMatch.courseType }}</strong></p>
             <p>👤 學員：{{ currentSelectedMatch.studentName }} ({{ currentSelectedMatch.venue }})</p>
+            <p v-if="currentSelectedMatch.notes" class="whitespace-pre-wrap">備註：{{ currentSelectedMatch.notes }}</p>
+            <p v-if="currentSelectedMatch.completionNotes">完課備註：{{ currentSelectedMatch.completionNotes }}</p>
             <p>👥 執教教練：<strong class="text-purple-800">{{ calcForm.coachNames }}</strong></p>
           </div>
 
@@ -623,6 +655,51 @@
 
   </main>
 
+  <div v-if="substituteEditor.show" class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+    <div role="dialog" aria-modal="true" aria-label="安排代課" class="bg-white rounded-xl p-5 w-full max-w-sm space-y-3 text-xs max-h-[90vh] overflow-y-auto">
+      <h2 class="font-bold text-base">安排／修改代課</h2>
+      <p>{{ substituteEditor.match?.matId }} · {{ substituteEditor.match?.lessonDate }}</p>
+      <p>目前授課：{{ substituteEditor.match?.coachNames }}</p>
+      <label class="block font-bold">代課名額
+        <select v-model="substituteEditor.coachUid" class="w-full mt-1 p-2 border rounded-lg">
+          <option value="SUB_COACH_1">代課教練一號</option>
+          <option value="SUB_COACH_2">代課教練二號</option>
+        </select>
+      </label>
+      <label class="block font-bold">實際代課教練姓名 *
+        <input v-model.trim="substituteEditor.substituteCoachName" maxlength="80" class="w-full mt-1 p-2 border rounded-lg">
+      </label>
+      <label class="block font-bold">課程備註
+        <textarea v-model="substituteEditor.notes" rows="3" maxlength="1000" class="w-full mt-1 p-2 border rounded-lg"></textarea>
+      </label>
+      <p class="text-slate-500">保存後，這堂課改由上方老師授課。學費維持原課程金額，完課時再回報實收。</p>
+      <button @click="saveSubstitute" :disabled="isProcessing" class="w-full py-2 rounded-lg bg-purple-700 text-white font-bold disabled:opacity-50">保存代課安排</button>
+      <button @click="substituteEditor.show = false" :disabled="isProcessing" class="w-full py-2 rounded-lg bg-slate-100">取消</button>
+    </div>
+  </div>
+  <div v-if="completionForm.show" class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+    <div role="dialog" aria-modal="true" aria-label="授課簽到" class="bg-white rounded-xl p-5 w-full max-w-sm space-y-3 text-xs max-h-[90vh] overflow-y-auto">
+      <h2 class="font-bold text-base">授課簽到與實收回報</h2>
+      <p>{{ completionForm.match?.matId }} · {{ completionForm.match?.studentName }}</p>
+      <p>授課：{{ completionForm.match?.substituteCoachName || completionForm.match?.coachNames }}</p>
+      <p v-if="completionForm.match?.notes" class="whitespace-pre-wrap">課程備註：{{ completionForm.match.notes }}</p>
+      <label class="block font-bold">回報現場實收學費（NT$）
+        <input v-model.number="completionForm.reportedRevenue" type="number" min="0" class="w-full mt-1 p-2 border rounded-lg">
+      </label>
+      <label class="block font-bold">出席狀況
+        <select v-model="completionForm.attendance" class="w-full mt-1 p-2 border rounded-lg">
+          <option>全員到課</option><option>部分到課</option><option>未到課/其他</option>
+        </select>
+      </label>
+      <label class="block font-bold">完課備註
+        <textarea v-model="completionForm.notes" maxlength="1000" rows="2" class="w-full mt-1 p-2 border rounded-lg"></textarea>
+      </label>
+      <p class="text-slate-500">簽到會記錄你的 LINE 身分；正式帳務仍由委員會核對。</p>
+      <button @click="submitAdminCompletion" :disabled="isProcessing" class="w-full py-2 rounded-lg bg-emerald-600 text-white font-bold disabled:opacity-50">確認授課簽到</button>
+      <button @click="completionForm.show = false" :disabled="isProcessing" class="w-full py-2 rounded-lg bg-slate-100">取消</button>
+    </div>
+  </div>
+
   <nav v-if="isAdminApproved" class="bg-white border-t border-slate-200 fixed bottom-0 left-0 right-0 max-w-md md:max-w-xl mx-auto z-30 flex">
     <button 
       @click="currentTab = 'matching'" 
@@ -754,7 +831,7 @@
         date: getTomorrowDate(),
         startTime: '18:00',
         endTime: '19:00',
-        designatedCoach: ''
+        designatedCoach: '', substituteCoachName: '', notes: ''
       });
 
       const validProxyEndTimes = computed(() => {
@@ -775,7 +852,7 @@
       const currentSelectedMatch = ref(null);
       const calcForm = reactive({
         revenue: 0,
-        venueCost: 600,
+        venueCost: 400,
         coachCount: 1,
         coachNames: ''
       });
@@ -949,17 +1026,29 @@
       }
 
       function expectedFeeForRequest(req) {
-        if (String(req.courseType || '').includes('初階')) return 1500;
+        if (String(req.courseType || '').includes('初階')) {
+          const count = Number(req.studentCount);
+          if (!Number.isInteger(count) || count < 4 || count > 6) throw new Error('初階團班請填寫 4～6 人。');
+          return (1500 / 5) * count;
+        }
         return Number(req.studentCount || 1) <= 2 ? 1400 : 1500;
+      }
+
+      function expectedFeeForMatch(match) {
+        if (!String(match.courseType || '').includes('初階')) return Number(match.expectedFee) || 0;
+        const request = rawRequests.value.find(r => r.reqId === match.reqId);
+        const count = Number(match.studentCount || request?.studentCount || String(match.courseType || '').match(/[(（](\d+)人/)?.[1]);
+        return count >= 4 && count <= 6 ? (1500 / 5) * count : Number(match.expectedFee) || 0;
       }
 
       function onSelectMatch() {
         const found = allMatches.value.find(m => m.matId === selectedMatId.value);
         if (found) {
           currentSelectedMatch.value = found;
-          calcForm.revenue = Number(found.expectedFee) || 1400;
-          calcForm.coachNames = found.coachNames || '';
-          const count = (found.coachNames || '').split(/[,、]/).filter(Boolean).length;
+          calcForm.revenue = Number(found.reportedRevenue !== '' && found.reportedRevenue != null ? found.reportedRevenue : expectedFeeForMatch(found)) || 0;
+          calcForm.venueCost = 400;
+          calcForm.coachNames = found.substituteCoachName || found.coachNames || '';
+          const count = (calcForm.coachNames || '').split(/[,、]/).filter(Boolean).length;
           calcForm.coachCount = count > 0 ? count : 1;
         } else {
           currentSelectedMatch.value = null;
@@ -973,7 +1062,8 @@
         const draftAssignments = new Map(
           rawRequests.value.map(r => [String(r.reqId || ''), {
             assignedCoachUid: r.assignedCoachUid || '',
-            assignedVenue: r.assignedVenue || ''
+            assignedVenue: r.assignedVenue || '',
+            substituteCoachName: r.substituteCoachName || '', notes: r.notes || ''
           }])
         );
 
@@ -997,6 +1087,8 @@
 
               return {
                 ...r,
+                substituteCoachName: draft?.substituteCoachName ?? r.substituteCoachName ?? '',
+                notes: draft?.notes ?? r.notes ?? '',
                 assignedCoachUid: draft?.assignedCoachUid || defaultCoachUid || '',
                 assignedVenue: draft?.assignedVenue || r.assignedVenue || r.venuePreference || '宜蘭國民運動中心'
               };
@@ -1014,6 +1106,8 @@
       }
 
       async function confirmMatch(req) {
+        try { expectedFeeForRequest(req); } catch (err) { alert(err.message); return; }
+        if (isSubstituteChoice(req.assignedCoachUid) && !req.substituteCoachName?.trim()) { alert('請填寫實際代課教練姓名。'); return; }
         if (checkConflict(req.assignedCoachUid, req.preferredDate, req.timeSlot)) {
           alert('此教練與既有正式課程有時間重疊，無法排課。');
           return;
@@ -1023,6 +1117,8 @@
           const assignedCoachName = coachNameByUid(req.assignedCoachUid);
           const payload = {
             action: 'confirmMatch',
+            accessToken: lineAccessToken(),
+            substituteCoachName: req.substituteCoachName || '', notes: req.notes || '',
             reqId: req.reqId,
             lessonDate: req.preferredDate,
             lessonTime: req.timeSlot,
@@ -1032,6 +1128,7 @@
             coachUid: req.assignedCoachUid,
             coachNames: assignedCoachName,
             courseType: req.courseType,
+            studentCount: req.studentCount,
             expectedFee: expectedFeeForRequest(req),
             managedBy: adminProfile.userId,
             managedByName: adminProfile.name
@@ -1056,6 +1153,8 @@
       }
 
       async function submitProxyBooking() {
+        try { expectedFeeForRequest(proxyForm); } catch (err) { alert(err.message); return; }
+        if (isSubstituteChoice(proxyForm.designatedCoach) && !proxyForm.substituteCoachName.trim()) { alert('請填寫實際代課教練姓名。'); return; }
         if (!proxyForm.studentName) {
           alert('請輸入學員稱呼！');
           return;
@@ -1075,7 +1174,10 @@
             studentCount: proxyForm.studentCount,
             designatedCoach: proxyForm.designatedCoach || '不指定(由委員會推薦)',
             venuePreference: '宜蘭國民運動中心',
-            notes: '由委員會代客口頭提單',
+            notes: proxyForm.notes,
+            accessToken: lineAccessToken(),
+            designatedCoachUid: findCoachUidByName(proxyForm.designatedCoach),
+            substituteCoachName: proxyForm.substituteCoachName,
             proxyAdminUid: adminProfile.userId
           };
           const res = await fetch(GAS_API_URL, {
@@ -1087,6 +1189,8 @@
           if (result.status === 'success') {
             alert(`代客需求單建立成功！單號：${result.reqId}`);
             proxyForm.studentName = '';
+            proxyForm.substituteCoachName = '';
+            proxyForm.notes = '';
             currentTab.value = 'matching';
             await loadAdminData();
           } else {
@@ -1099,30 +1203,75 @@
         }
       }
 
-      async function markCompletedAdmin(match) {
+      function lineAccessToken() {
+        return typeof liff !== 'undefined' && liff.isLoggedIn() ? liff.getAccessToken() : '';
+      }
+      function isSubstituteChoice(value) {
+        return ['SUB_COACH_1', 'SUB_COACH_2', '代課教練一號', '代課教練二號'].includes(value);
+      }
+      const canDelegateCheckin = computed(() => ['Ud471b1a7217b649b3599b54700d352c9', 'U24533fdb919248f20b70d39f89f237c1'].includes(adminProfile.userId));
+      const substituteEditor = reactive({ show: false, match: null, coachUid: 'SUB_COACH_1', substituteCoachName: '', notes: '' });
+      function openSubstituteEditor(match) {
+        substituteEditor.match = match;
+        substituteEditor.coachUid = isSubstituteChoice(match.coachUid) ? match.coachUid : 'SUB_COACH_1';
+        substituteEditor.substituteCoachName = match.substituteCoachName || '';
+        substituteEditor.notes = match.notes || '';
+        substituteEditor.show = true;
+      }
+      async function saveSubstitute() {
+        if (isProcessing.value || !substituteEditor.match) return;
+        if (!substituteEditor.substituteCoachName.trim()) { alert('請填寫實際代課教練姓名。'); return; }
+        isProcessing.value = true;
         try {
           const res = await fetch(GAS_API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({
-              action: 'coachCompleteLesson',
-              matId: match.matId,
-              actualRevenue: Number(match.expectedFee) || 1400,
-              coachNames: match.coachNames
-            })
+            method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'assignSubstitute', accessToken: lineAccessToken(),
+              matId: substituteEditor.match.matId, coachUid: substituteEditor.coachUid,
+              substituteCoachName: substituteEditor.substituteCoachName, notes: substituteEditor.notes })
           });
           const result = await res.json();
-          if (result.status === 'success') {
-            alert(`單號 ${match.matId} 已標記完課！`);
-            await loadAdminData();
-            currentTab.value = 'accounting';
-            accountingSubView.value = 'slip';
-            selectedMatId.value = match.matId;
-            onSelectMatch();
-          }
-        } catch (err) {
-          alert('標註異常：' + err.toString());
+          if (result.status !== 'success') throw new Error(result.message || '保存失敗');
+          substituteEditor.show = false;
+          await loadAdminData();
+          alert('代課安排與備註已保存。');
+        } catch (err) { alert(err.message); }
+        finally { isProcessing.value = false; }
+      }
+      const completionForm = reactive({ show: false, match: null, reportedRevenue: 0, attendance: '全員到課', notes: '' });
+      function markCompletedAdmin(match) {
+        if (isSubstituteChoice(match.coachUid || match.coachNames) && !canDelegateCheckin.value) {
+          alert('代課簽到由杜和益或黃嘉文協助。'); return;
         }
+        completionForm.match = match;
+        completionForm.reportedRevenue = expectedFeeForMatch(match);
+        completionForm.attendance = '全員到課';
+        completionForm.notes = '';
+        completionForm.show = true;
+      }
+      async function submitAdminCompletion() {
+        if (isProcessing.value || !completionForm.match) return;
+        if (completionForm.reportedRevenue === '' || !Number.isFinite(Number(completionForm.reportedRevenue)) || Number(completionForm.reportedRevenue) < 0) {
+          alert('請填寫零或正數的實收金額。'); return;
+        }
+        isProcessing.value = true;
+        try {
+          const matId = completionForm.match.matId;
+          const res = await fetch(GAS_API_URL, {
+            method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'coachCompleteLesson', matId, accessToken: lineAccessToken(),
+              reportedRevenue: Number(completionForm.reportedRevenue), attendance: completionForm.attendance, notes: completionForm.notes })
+          });
+          const result = await res.json();
+          if (result.status !== 'success') throw new Error(result.message || '簽到失敗');
+          completionForm.show = false;
+          await loadAdminData();
+          currentTab.value = 'accounting';
+          accountingSubView.value = 'slip';
+          selectedMatId.value = matId;
+          onSelectMatch();
+          alert('已保存完課回報，請核對實收與場地費後核銷。');
+        } catch (err) { alert(err.message); }
+        finally { isProcessing.value = false; }
       }
 
       async function forceCancel(match) {
@@ -1217,6 +1366,7 @@
         try {
           const payload = {
             action: 'settleLessonAccounting',
+            accessToken: lineAccessToken(),
             matId: selectedMatId.value,
             lessonDate: currentSelectedMatch.value.lessonDate || getTomorrowDate(),
             actualRevenue: calcForm.revenue,
@@ -1313,6 +1463,8 @@
 
       return {
         adminProfile,
+        isSubstituteChoice, canDelegateCheckin, substituteEditor, openSubstituteEditor, saveSubstitute,
+        completionForm, submitAdminCompletion,
         isAdminApproved,
         currentTab,
         accountingSubView,
@@ -1328,6 +1480,7 @@
         approvedCoachesNames,
         approvedCoachesList,
         pendingRequests,
+        expectedFeeForRequest, expectedFeeForMatch,
         allMatches,
         scheduleGroups,
         historyExpanded,
