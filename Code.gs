@@ -1,5 +1,5 @@
 /**
- * 匹克球預約與媒合系統 - 後端核心 RESTful API (Code.gs v2.3 - 代課教練與代理簽到)
+ * 匹克球預約與媒合系統 - 後端核心 RESTful API (Code.gs v2.4 - 初階每人五堂1500、場地費預設400)
  * 負責處理全三端 (學員、教練、委員會) 之 GET 讀取與 POST 寫入交易
  * 整合 LockService 防併發衝堂、自動核發單號與財務核算
  */
@@ -730,6 +730,7 @@ function handleAssignSubstitute(p) {
 }
 
 function handleSubmitStudentRequest(p, isProxy) {
+  if (String(p.courseType || '').includes('初階')) expectedLessonFee(p);
   const option = substituteOption(p.designatedCoachUid) || substituteOption(p.designatedCoach);
   let name = '';
   if (option) {
@@ -764,7 +765,7 @@ function handleConfirmMatch(p) {
     reqId: p.reqId || '', lessonDate: p.lessonDate, lessonTime: p.lessonTime, venue: p.venue,
     studentUid: p.studentUid, studentName: p.studentName,
     coachUid: option ? option.coachUid : (p.coachUid || ''), coachNames: option ? option.realName : p.coachNames,
-    courseType: p.courseType, expectedFee: moneyValue(p.expectedFee, '預估學費'), status: 'Confirmed',
+    courseType: p.courseType, expectedFee: expectedLessonFee(Object.assign({}, p, request || {})), studentCount: Number((request || p).studentCount) || '', status: 'Confirmed',
     managedBy: actor ? actor.userId : p.managedBy,
     substituteCoachName: option ? requiredSubstituteName(p.substituteCoachName || (request && request.substituteCoachName)) : '',
     notes: lessonNotes(p.notes === undefined ? (request && request.notes) : p.notes)
@@ -809,7 +810,7 @@ function handleSettleLessonAccounting(p) {
   if (!match || match.status !== 'Completed' || getRowsData(accSheet).some(a => a.matId === p.matId)) throw new Error('課程尚未完課或已核銷，請重新整理。');
   const actor = isSubstituteLesson(match) ? requireVerifiedAdmin(p) : null;
   const actualRevenue = moneyValue(p.actualRevenue, '實收學費');
-  const venueCost = moneyValue(p.venueCost, '場地費');
+  const venueCost = moneyValue(p.venueCost === undefined || p.venueCost === null || p.venueCost === '' ? 400 : p.venueCost, '場地費');
   const substituteName = isSubstituteLesson(match) ? requiredSubstituteName(match.substituteCoachName) : '';
   const coachList = substituteName || match.coachNames;
   const coachCount = String(coachList || '').split(/[,、]/).filter(s => s.trim()).length;
@@ -827,4 +828,16 @@ function handleSettleLessonAccounting(p) {
   });
   updateFields(matSheet, 'matId', match.matId, { actualRevenue: actualRevenue, status: 'Settled' });
   return { status: 'success', accId: accId, perCoachPay: perCoachPay };
+}
+
+// 初階是每人五堂套課1500元；MAT 預估費用代表全班的單堂金額。
+function expectedLessonFee(request) {
+  const count = Number(request.studentCount);
+  if (String(request.courseType || '').includes('初階')) {
+    if (!Number.isInteger(count) || count < 4 || count > 6) throw new Error('初階團班請填寫 4～6 人。');
+    return (1500 / 5) * count;
+  }
+  // 進階維持原本整堂計價。
+  if (Number.isInteger(count) && count >= 1 && count <= 4) return count <= 2 ? 1400 : 1500;
+  return moneyValue(request.expectedFee, '預估學費');
 }
