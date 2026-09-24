@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>匹克球預約管理後台 - 委員會端</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
@@ -14,6 +14,20 @@
     body { font-family: 'Noto Sans TC', sans-serif; -webkit-tap-highlight-color: transparent; }
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+    /* 手機放大字體時保留可讀寬度，清單獨立捲動。 */
+    #app, main, section, .grid, .flex, .flex-1 { min-width: 0; }
+    #app main, #app section { overflow-wrap: anywhere; }
+    #app button, #app select, #app input, #app textarea { min-width: 0; max-width: 100%; }
+    #app button { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+    #app .grid { grid-template-columns: repeat(auto-fit,minmax(min(100%,9rem),1fr)); }
+    .scroll-list { max-height: min(65vh,40rem); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+    .scroll-dialog { max-height: calc(100dvh - 2rem); overflow-y: auto; overscroll-behavior: contain; }
+    .calendar-scroll { overflow-x: auto; overflow-y: auto; max-height: 70vh; scrollbar-width: thin; }
+    .calendar-grid { display: grid; grid-template-columns: repeat(7,minmax(96px,1fr)); min-width: 672px; }
+    @media (min-width: 800px) { #app { max-width: 1000px !important; } }
+    #app nav { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
+    #app nav button { flex: 0 0 4.6rem; }
   </style>
 </head>
 <body class="bg-slate-100 text-slate-800 antialiased min-h-screen pb-24">
@@ -91,8 +105,34 @@
   <!-- 委員會管理主畫面 -->
   <main v-else class="flex-1 p-4 overflow-y-auto">
 
+
+    <section v-if="currentTab === 'calendar'" class="space-y-4 scroll-list">
+      <div class="flex flex-wrap items-center gap-2"><h1 class="font-bold text-xl flex-1">課程行事曆</h1><button @click="calendarMode='month'" :class="calendarMode==='month'?'bg-purple-700 text-white':'bg-slate-100'" class="rounded-lg px-3 py-2">月</button><button @click="calendarMode='week'" :class="calendarMode==='week'?'bg-purple-700 text-white':'bg-slate-100'" class="rounded-lg px-3 py-2">週</button></div>
+      <div class="flex items-center justify-between gap-2"><button @click="shiftCalendar(-1)" class="p-2 border rounded-lg">← 上一{{calendarMode==='month'?'月':'週'}}</button><strong>{{calendarTitle}}</strong><button @click="shiftCalendar(1)" class="p-2 border rounded-lg">下一{{calendarMode==='month'?'月':'週'}} →</button></div>
+      <div class="flex flex-wrap gap-2 text-xs"><label><input type="checkbox" v-model="calendarTypes.slot"> 🟦 教練空檔</label><label><input type="checkbox" v-model="calendarTypes.request"> 🟨 待媒合需求</label><label><input type="checkbox" v-model="calendarTypes.match"> 🟩 已排程</label><label><input type="checkbox" v-model="calendarTypes.makeup"> 🟪 補課</label></div>
+      <label class="text-xs">篩選教練 <select v-model="calendarCoach" class="border rounded-lg p-2 w-full"><option value="">全部教練</option><option v-for="c in approvedCoachesList" :value="c.coachUid" :key="c.coachUid">{{coachDisplayName(c)}}</option></select></label>
+      <div class="calendar-scroll border rounded-xl"><div class="calendar-grid text-center bg-slate-100 text-xs font-bold"><span v-for="day in ['日','一','二','三','四','五','六']" :key="day" class="p-2">{{day}}</span></div><div class="calendar-grid"><div v-for="day in calendarDays" :key="day.date" class="min-h-28 border p-1.5 text-xs" :class="day.inPeriod?'bg-white':'bg-slate-50 text-slate-400'"><strong>{{day.date.slice(-2)}}</strong><div class="space-y-1 mt-1"><div v-for="item in eventsForDay(day.date)" :key="item.key" :class="item.kind==='slot'?'bg-blue-100 text-blue-900':item.kind==='request'?'bg-amber-100 text-amber-900':item.kind==='makeup'?'bg-purple-100 text-purple-900':'bg-emerald-100 text-emerald-900'" class="rounded p-1 break-words">{{item.time}} {{item.title}}</div></div></div></div></div>
+      <p class="text-xs text-slate-500">左右滑動查看整週；課程、空檔與需求按台北日期顯示。</p>
+    </section>
+    <section v-if="currentTab === 'attendance'" class="space-y-4 scroll-list">
+      <div class="flex flex-wrap items-center justify-between gap-2"><h1 class="font-bold text-xl">初階班名冊與補課</h1><button @click="loadLearning" class="text-purple-700 underline">更新紀錄</button></div>
+      <p class="text-xs text-slate-500">個別點名保留三個月；待處理補課的原缺課紀錄會保留至結案。</p>
+      <div class="scroll-list space-y-3">
+        <div v-for="m in learning.matches" :key="m.matId" class="border rounded-xl p-3 space-y-2 text-xs">
+          <p class="font-bold">{{m.lessonDate}} {{m.lessonTime}}｜{{m.coachNames}}｜{{m.matId}}</p><p>{{m.studentName}} · {{m.roster.length}} 人</p>
+          <p v-if="m.rosterNeedsReview" class="bg-amber-50 text-amber-900 p-2 rounded">舊需求單名冊待確認，請先補齊每位學員姓名。</p>
+          <div v-for="member in m.roster" :key="member.id" class="flex flex-wrap justify-between gap-2 border-t pt-2"><span>{{member.name}} <small>{{member.groupName}}</small></span><span>{{attendanceFor(m.matId,member.id)?.status==='Present'?'出席':attendanceFor(m.matId,member.id)?.status==='Excused'?'請假':attendanceFor(m.matId,member.id)?.status==='Absent'?'缺席':'未點名'}}</span></div>
+          <button v-if="m.status==='Confirmed'" @click="editRoster(m)" class="border rounded-lg px-3 py-2">編輯名冊</button>
+          <button v-if="['Confirmed','Completed','Settled'].includes(m.status)" @click="editAttendance(m)" class="border rounded-lg px-3 py-2">逐人點名</button>
+        </div>
+      </div>
+      <h2 class="font-bold">近三個月個別統計</h2><div class="scroll-list space-y-2"><div v-for="x in attendanceSummary" :key="x.memberId" class="border rounded-lg p-2 text-xs">{{x.name}}：出席 {{x.present}}／請假 {{x.excused}}／缺席 {{x.absent}}／待補 {{x.pending}}</div></div>
+      <h2 class="font-bold">缺課與補課申請</h2><div class="scroll-list space-y-2"><div v-for="x in learning.makeup" :key="x.makeupId" class="border rounded-lg p-3 text-xs space-y-2"><p>{{x.memberName}}｜原課 {{x.sourceMatId}}｜{{x.status==='Pending'?'待核准':x.status==='Approved'?'已核准待排課':x.status==='Scheduled'?'已安排補課':x.status==='Completed'?'已補課':'未核准'}}</p><p v-if="x.targetMatId">補課 {{x.targetMatId}}</p><div v-if="['Pending','Approved','Scheduled'].includes(x.status)" class="flex flex-wrap gap-2"><button @click="reviewMakeup(x,'Approved')" class="border rounded p-2">核准</button><button @click="reviewMakeup(x,'Scheduled')" class="border rounded p-2">安排到課程</button><button @click="reviewMakeup(x,'Rejected')" class="border rounded p-2">不核准</button></div></div></div>
+      <h2 class="font-bold">近三個月點名明細</h2><div class="scroll-list space-y-2"><div v-for="x in learning.attendance" :key="x.attendanceId" class="border rounded-lg p-2 flex flex-wrap justify-between gap-2 text-xs"><span>{{x.lessonDate}} {{x.memberName}}｜{{x.status}}</span><div class="flex gap-2"><button v-if="['Absent','Excused'].includes(x.status)" @click="requestMakeupAdmin(x)" class="text-purple-700">提出補課</button><button @click="deleteAttendanceAdmin(x)" class="text-red-700">刪除</button></div></div></div>
+    </section>
+
     <!-- Tab 1: 撮合排課工作台 -->
-    <section v-if="currentTab === 'matching'" class="space-y-4">
+    <section v-if="currentTab === 'matching'" class="space-y-4 scroll-list">
       <div class="border-b pb-3 flex justify-between items-end">
         <div>
           <h1 class="text-xl font-bold text-slate-900">需求撮合工作台</h1>
@@ -107,7 +147,7 @@
         目前無待處理的媒合需求
       </div>
 
-      <div v-else class="space-y-4">
+      <div v-else class="space-y-4 scroll-list">
         <div 
           v-for="req in pendingRequests" 
           :key="req.reqId"
@@ -449,7 +489,7 @@
     </section>
 
     <!-- Tab 4: 結課均分記帳與發薪看板 -->
-    <section v-if="currentTab === 'accounting'" class="space-y-4">
+    <section v-if="currentTab === 'accounting'" class="space-y-4 scroll-list">
       <div class="border-b pb-3">
         <h1 class="text-xl font-bold text-slate-900">財務記帳與發薪看板</h1>
         <p class="text-xs text-slate-500 mt-0.5">課堂結算傳票 (ACC-) ↔ 教練實領薪資作帳管理</p>
@@ -473,7 +513,7 @@
         </button>
       </div>
 
-      <div v-if="accountingSubView === 'slip'" class="space-y-4">
+      <div v-if="accountingSubView === 'slip'" class="space-y-4 scroll-list">
         <div class="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 text-xs">
           <div class="flex justify-between items-center">
             <h2 class="font-bold text-slate-900 text-sm">課堂收支試算</h2>
@@ -577,7 +617,7 @@
         </div>
       </div>
 
-      <div v-if="accountingSubView === 'payroll'" class="space-y-4">
+      <div v-if="accountingSubView === 'payroll'" class="space-y-4 scroll-list">
         <div class="grid grid-cols-2 gap-3">
           <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
             <span class="text-[11px] text-amber-700 font-bold block">待發放薪資總額</span>
@@ -700,7 +740,11 @@
     </div>
   </div>
 
+  <div v-if="attendanceEditor.show" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"><div class="bg-white rounded-xl p-4 w-full max-w-lg scroll-dialog space-y-3"><h2 class="font-bold">逐人點名｜{{attendanceEditor.match?.matId}}</h2><div v-for="person in attendanceEditor.members" :key="person.id" class="border rounded-lg p-2 space-y-1"><p>{{person.name}} <small>{{person.groupName}}</small></p><select v-model="person.status" class="border rounded p-2 w-full"><option value="">尚未點名</option><option value="Present">出席</option><option value="Excused">請假</option><option value="Absent">缺席</option></select><input v-model="person.notes" placeholder="個別備註" class="border rounded p-2 w-full"></div><button @click="saveAdminAttendance" class="bg-purple-700 text-white rounded p-2 w-full">儲存點名</button><button @click="attendanceEditor.show=false" class="border rounded p-2 w-full">關閉</button></div></div>
+  <div v-if="rosterEditor.show" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"><div class="bg-white rounded-xl p-4 w-full max-w-lg scroll-dialog space-y-3"><h2 class="font-bold">編輯個別名冊｜{{rosterEditor.match?.matId}}</h2><p class="text-xs">每人一列，可填組別。學員姓名必填。</p><div v-for="(person,i) in rosterEditor.roster" :key="person.id" class="flex gap-2"><input v-model="person.name" placeholder="姓名" class="border rounded p-2 flex-1"><input v-model="person.groupName" placeholder="組別" class="border rounded p-2 w-24"><button @click="rosterEditor.roster.splice(i,1)" class="text-red-700">移除</button></div><button @click="rosterEditor.roster.push({id:'NEW-'+Date.now()+'-'+Math.random().toString(36).slice(2),name:'',groupName:'',ownerUid:rosterEditor.match.studentUid})" class="border rounded p-2">加入學員</button><div class="flex gap-2"><button @click="saveRoster" class="bg-purple-700 text-white rounded p-2 flex-1">儲存名冊</button><button @click="rosterEditor.show=false" class="border rounded p-2">關閉</button></div></div></div>
   <nav v-if="isAdminApproved" class="bg-white border-t border-slate-200 fixed bottom-0 left-0 right-0 max-w-md md:max-w-xl mx-auto z-30 flex">
+    <button @click="currentTab='calendar'" :class="currentTab==='calendar'?'text-purple-700 font-bold':'text-slate-500'" class="flex-1 py-2 text-xs">📅<br>行事曆</button>
+    <button @click="currentTab='attendance';loadLearning()" :class="currentTab==='attendance'?'text-purple-700 font-bold':'text-slate-500'" class="flex-1 py-2 text-xs">✅<br>點名補課</button>
     <button 
       @click="currentTab = 'matching'" 
       :class="currentTab === 'matching' ? 'text-purple-700 font-bold' : 'text-slate-400 hover:text-slate-600'"
@@ -785,6 +829,33 @@
         return part('year') + '-' + part('month') + '-' + part('day');
       }
       const todayTaipei = ref(getTaipeiDate());
+      const rawSlots=ref([]);
+      const calendarMode=ref('month'),calendarAnchor=ref(getTaipeiDate()),calendarCoach=ref('');
+      const calendarTypes=reactive({slot:true,request:true,match:true,makeup:true});
+      const learning=reactive({matches:[],attendance:[],makeup:[]});
+      const rosterEditor=reactive({show:false,match:null,roster:[]});
+      const attendanceEditor=reactive({show:false,match:null,members:[]});
+      const attendanceSummary=computed(()=>{const byId=new Map();for(const x of learning.attendance){const item=byId.get(x.memberId)||{memberId:x.memberId,name:x.memberName,present:0,excused:0,absent:0,pending:0};if(x.status==='Present')item.present++;if(x.status==='Excused')item.excused++;if(x.status==='Absent')item.absent++;if(['Absent','Excused'].includes(x.status)&&!learning.makeup.some(m=>m.sourceAttendanceId===x.attendanceId&&m.status==='Completed'))item.pending++;byId.set(x.memberId,item);}return [...byId.values()];});
+      const isoDate=d=>d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0');
+      function shiftCalendar(amount){const d=new Date(calendarAnchor.value+'T00:00:00Z');if(calendarMode.value==='month')d.setUTCMonth(d.getUTCMonth()+amount);else d.setUTCDate(d.getUTCDate()+7*amount);calendarAnchor.value=isoDate(d);}
+      const calendarTitle=computed(()=>calendarMode.value==='month'?calendarAnchor.value.slice(0,7):calendarDays.value[0]?.date+' ～ '+calendarDays.value[6]?.date);
+      const calendarDays=computed(()=>{const d=new Date(calendarAnchor.value+'T00:00:00Z');if(calendarMode.value==='month')d.setUTCDate(1);const month=d.getUTCMonth();d.setUTCDate(d.getUTCDate()-d.getUTCDay());const count=calendarMode.value==='month'?42:7;return Array.from({length:count},(_,i)=>{const day=new Date(d);day.setUTCDate(d.getUTCDate()+i);return {date:isoDate(day),inPeriod:calendarMode.value==='week'||day.getUTCMonth()===month};});});
+      function eventsForDay(date){const events=[];if(calendarTypes.slot)for(const s of rawSlots.value.filter(x=>x.slotDate===date && x.status==='Open' && (!calendarCoach.value||x.coachUid===calendarCoach.value)))events.push({key:'s'+s.slotId,kind:'slot',time:s.timeSlot,title:'教練空檔 '+s.coachName});
+        if(calendarTypes.request)for(const r of rawRequests.value.filter(x=>x.preferredDate===date && ['Pending','Interested'].includes(x.status) && (!calendarCoach.value||x.designatedCoachUid===calendarCoach.value||x.assignedCoachUid===calendarCoach.value)))events.push({key:'r'+r.reqId,kind:'request',time:r.timeSlot,title:'待媒合 '+r.studentName});
+        if(calendarTypes.match)for(const m of allMatches.value.filter(x=>x.lessonDate===date && !String(x.status).startsWith('Cancelled') && (!calendarCoach.value||String(x.coachUid||'').split(/[,、]/).includes(calendarCoach.value))))events.push({key:'m'+m.matId,kind:'match',time:m.lessonTime,title:'已排程 '+m.studentName+' · '+m.coachNames});
+        if(calendarTypes.makeup)for(const x of learning.makeup.filter(x=>x.status==='Scheduled' && allMatches.value.some(m=>m.matId===x.targetMatId&&m.lessonDate===date)))events.push({key:'u'+x.makeupId,kind:'makeup',time:'補課',title:x.memberName});
+        return events;}
+      async function learningPost(payload){const res=await fetch(GAS_API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...payload,accessToken:lineAccessToken()})});const data=await res.json();if(data.status!=='success')throw Error(data.message||'操作失敗');return data;}
+      async function loadLearning(){try{const data=await learningPost({action:'getLearningData'});learning.matches=data.matches||[];learning.attendance=data.attendance||[];learning.makeup=data.makeup||[];}catch(e){alert('讀取點名失敗：'+e.message);}}
+      const attendanceFor=(matId,memberId)=>learning.attendance.find(x=>x.matId===matId&&x.memberId===memberId);
+      function editRoster(match){rosterEditor.match=match;let members=[];try{members=JSON.parse(match.rosterJson||'[]');}catch(_){}rosterEditor.roster=members.map(x=>({...x}));rosterEditor.show=true;}
+      async function saveRoster(){try{await learningPost({action:'saveBasicRoster',matId:rosterEditor.match.matId,roster:rosterEditor.roster});rosterEditor.show=false;await loadLearning();await loadAdminData();}catch(e){alert(e.message);}}
+      function editAttendance(match){attendanceEditor.match=match;attendanceEditor.members=match.roster.map(x=>({...x,status:attendanceFor(match.matId,x.id)?.status||'',notes:attendanceFor(match.matId,x.id)?.notes||''}));attendanceEditor.show=true;}
+      async function saveAdminAttendance(){if(!attendanceEditor.members.length||attendanceEditor.members.some(x=>!x.status)){alert('請逐人完成點名。');return;}try{await learningPost({action:'saveBasicAttendance',matId:attendanceEditor.match.matId,entries:attendanceEditor.members.map(x=>({memberId:x.id,status:x.status,notes:x.notes||''}))});attendanceEditor.show=false;await loadLearning();}catch(e){alert(e.message);}}
+      async function reviewMakeup(item,status){let targetMatId='';if(status==='Scheduled'){targetMatId=prompt('請輸入補課目標課程 MAT 單號');if(!targetMatId)return;}try{await learningPost({action:'reviewBasicMakeup',makeupId:item.makeupId,status,targetMatId});await loadLearning();}catch(e){alert(e.message);}}
+      async function requestMakeupAdmin(x){try{await learningPost({action:'requestBasicMakeup',attendanceId:x.attendanceId});await loadLearning();}catch(e){alert(e.message);}}
+      async function deleteAttendanceAdmin(x){if(!confirm('確定刪除 '+x.memberName+' 的 '+x.lessonDate+' 點名紀錄？此操作無法復原。'))return;try{await learningPost({action:'deleteAttendanceRecord',attendanceId:x.attendanceId});await loadLearning();}catch(e){alert(e.message);}}
+
       function refreshTaipeiDate() { todayTaipei.value = getTaipeiDate(); }
       let scheduleDateTimer;
       onMounted(() => {
@@ -1028,7 +1099,7 @@
       function expectedFeeForRequest(req) {
         if (String(req.courseType || '').includes('初階')) {
           const count = Number(req.studentCount);
-          if (!Number.isInteger(count) || count < 4 || count > 6) throw new Error('初階團班請填寫 4～6 人。');
+          if (!Number.isInteger(count) || count < 1 || count > 6) throw new Error('初階報名人數須為 1～6 人。');
           return (1500 / 5) * count;
         }
         return Number(req.studentCount || 1) <= 2 ? 1400 : 1500;
@@ -1095,6 +1166,7 @@
             });
 
             allMatches.value = data.matches || [];
+            rawSlots.value = data.slots || [];
             rawAdmins.value = data.admins || [];
             rawAccounting.value = data.accounting || [];
           } else if (data.status === 'unauthorized') {
@@ -1106,6 +1178,10 @@
       }
 
       async function confirmMatch(req) {
+        if(String(req.courseType||'').includes('初階')){
+          const candidates=pendingRequests.value.filter(r=>r.reqId!==req.reqId && String(r.courseType||'').includes('初階') && r.preferredDate===req.preferredDate && r.timeSlot===req.timeSlot);
+          if(candidates.length){const answer=prompt('同一時段可合班的需求單：\n'+candidates.map(r=>r.reqId+' '+r.studentName+'（'+r.studentCount+'人）').join('\n')+'\n請輸入要合班的 REQ 單號，以逗號分隔；不合班請留空。','');if(answer===null)return;req.linkedReqIds=answer.split(/[,，、\s]+/).map(s=>s.trim()).filter(Boolean);}
+        }
         try { expectedFeeForRequest(req); } catch (err) { alert(err.message); return; }
         if (isSubstituteChoice(req.assignedCoachUid) && !req.substituteCoachName?.trim()) { alert('請填寫實際代課教練姓名。'); return; }
         if (checkConflict(req.assignedCoachUid, req.preferredDate, req.timeSlot)) {
@@ -1130,6 +1206,7 @@
             courseType: req.courseType,
             studentCount: req.studentCount,
             expectedFee: expectedFeeForRequest(req),
+            linkedReqIds: req.linkedReqIds || [],
             managedBy: adminProfile.userId,
             managedByName: adminProfile.name
           };
@@ -1153,6 +1230,8 @@
       }
 
       async function submitProxyBooking() {
+        if(String(proxyForm.courseType||'').includes('初階')){const names=prompt('請逐行填寫 '+proxyForm.studentCount+' 位學員；可用「組別|姓名」區分朋友群組。','');if(names===null)return;proxyForm.participants=names.split(/\r?\n/).map(n=>{const parts=n.split('|');return {name:(parts.pop()||'').trim(),groupName:parts.join('|').trim()};}).filter(n=>n.name);if(proxyForm.participants.length!==Number(proxyForm.studentCount)){alert('姓名數量須與人數一致。');return;}}
+
         try { expectedFeeForRequest(proxyForm); } catch (err) { alert(err.message); return; }
         if (isSubstituteChoice(proxyForm.designatedCoach) && !proxyForm.substituteCoachName.trim()) { alert('請填寫實際代課教練姓名。'); return; }
         if (!proxyForm.studentName) {
@@ -1172,6 +1251,7 @@
             timeSlot: timeSlotString,
             level: '待評估',
             studentCount: proxyForm.studentCount,
+            participants: proxyForm.participants || [],
             designatedCoach: proxyForm.designatedCoach || '不指定(由委員會推薦)',
             venuePreference: '宜蘭國民運動中心',
             notes: proxyForm.notes,
@@ -1459,10 +1539,11 @@
           }
         }
         await loadAdminData();
+        if(isAdminApproved.value) await loadLearning();
       });
 
       return {
-        adminProfile,
+        adminProfile, calendarMode,calendarAnchor,calendarTitle,calendarDays,calendarCoach,calendarTypes,shiftCalendar,eventsForDay,learning,loadLearning,attendanceFor,attendanceSummary,rosterEditor,editRoster,saveRoster,attendanceEditor,editAttendance,saveAdminAttendance,reviewMakeup,requestMakeupAdmin,deleteAttendanceAdmin,
         isSubstituteChoice, canDelegateCheckin, substituteEditor, openSubstituteEditor, saveSubstitute,
         completionForm, submitAdminCompletion,
         isAdminApproved,
