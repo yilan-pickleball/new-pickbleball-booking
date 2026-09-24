@@ -347,6 +347,13 @@
               {{ m.status === 'Settled' ? '✓ 薪資已核銷' : '✓ 簽到已回報後台' }}
             </div>
           </div>
+          <button
+            v-if="String(m.courseType || '').includes('初階') && m.status === 'Confirmed'"
+            @click="openAttendanceModal(m)"
+            class="w-full rounded-lg border border-blue-300 bg-blue-50 px-3 py-2.5 text-sm font-bold text-blue-800"
+          >
+            👥 逐人點名（可先儲存，稍後再完課）
+          </button>
         </div>
       </div>
     </section>
@@ -365,8 +372,29 @@
       <p>{{ m.studentName }} · {{ m.matId }}</p>
       <p v-if="m.notes" class="whitespace-pre-wrap">備註：{{ m.notes }}</p>
       <button @click="openCheckinModal(m)" class="w-full py-2 rounded-lg bg-emerald-600 text-white font-bold">協助授課簽到</button>
+      <button v-if="String(m.courseType || '').includes('初階')" @click="openAttendanceModal(m)" class="w-full rounded-lg border border-blue-300 bg-blue-50 py-2 font-bold text-blue-800">協助逐人點名</button>
     </div>
   </section>
+
+  <div v-if="attendanceModal.show" class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4">
+    <div class="scroll-dialog w-full max-w-sm space-y-3 rounded-2xl bg-white p-5 shadow-2xl">
+      <h2 class="text-base font-bold text-slate-900">初階團班逐人點名</h2>
+      <p class="text-xs text-slate-600">{{ attendanceModal.match?.lessonDate }} {{ attendanceModal.match?.lessonTime }} · {{ attendanceModal.match?.matId }}</p>
+      <p class="text-xs text-slate-500">可在上課時先儲存；完課與收入稍後另外回報。</p>
+      <p v-if="attendanceModal.loading" class="text-sm text-blue-700">正在載入學員名冊…</p>
+      <p v-else-if="attendanceModal.error" class="rounded-lg bg-red-50 p-2 text-sm text-red-700">{{ attendanceModal.error }}</p>
+      <div v-for="person in attendanceModal.roster" :key="person.id" class="space-y-2 rounded-lg border border-slate-200 p-3">
+        <p class="text-sm font-semibold">{{ person.name }} <span v-if="person.makeupId" class="text-purple-700">補課</span></p>
+        <label :for="'coach-attendance-' + person.id" class="block text-xs text-slate-600">出席狀態</label>
+        <select :id="'coach-attendance-' + person.id" v-model="person.status" class="w-full rounded-lg border border-slate-300 p-2 text-sm">
+          <option value="">尚未點名</option><option value="Present">出席</option><option value="Excused">請假</option><option value="Absent">缺席</option>
+        </select>
+        <input v-model="person.notes" type="text" maxlength="1000" placeholder="個別備註（選填）" class="w-full rounded-lg border border-slate-300 p-2 text-sm">
+      </div>
+      <button @click="saveAttendanceOnly" :disabled="attendanceModal.loading || attendanceModal.saving || !attendanceModal.roster.length" class="w-full rounded-lg bg-blue-700 px-3 py-2.5 text-sm font-bold text-white disabled:opacity-50">{{ attendanceModal.saving ? '儲存中…' : '儲存逐人點名' }}</button>
+      <button @click="attendanceModal.show = false" :disabled="attendanceModal.saving" class="w-full rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">關閉</button>
+    </div>
+  </div>
 
 
   <div v-if="checkinModal.show" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
@@ -561,6 +589,7 @@
       }
 
       const learningMatches=ref([]);
+      const attendanceModal = reactive({ show: false, match: null, roster: [], loading: false, saving: false, error: '' });
       const checkinModal = reactive({roster:[],
         show: false,
         targetMatch: null,
@@ -730,6 +759,66 @@
       }
 
       async function loadBasicRoster(matId){try{const data=await fetch(GAS_API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'getLearningData',accessToken:lineAccessToken()})}).then(r=>r.json());if(data.status!=='success')throw Error(data.message);learningMatches.value=data.matches||[];const lesson=learningMatches.value.find(m=>m.matId===matId);const old=data.attendance||[];checkinModal.roster=(lesson?.roster||[]).map(x=>({...x,status:old.find(a=>a.matId===matId&&a.memberId===x.id)?.status||'',notes:old.find(a=>a.matId===matId&&a.memberId===x.id)?.notes||''}));}catch(e){alert('讀取名冊失敗：'+e.message);}}
+
+      async function openAttendanceModal(match) {
+        attendanceModal.match = match;
+        attendanceModal.roster = [];
+        attendanceModal.error = '';
+        attendanceModal.show = true;
+        attendanceModal.loading = true;
+        try {
+          const response = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'getLearningData', accessToken: lineAccessToken() })
+          });
+          const data = await response.json();
+          if (data.status !== 'success') throw new Error(data.message || '讀取名冊失敗。');
+          const lesson = (data.matches || []).find(item => item.matId === match.matId);
+          if (!lesson || !lesson.roster?.length) throw new Error('尚無個別學員名冊，請委員會先補齊。');
+          if (lesson.rosterNeedsReview) throw new Error('名冊仍待委員會確認學員姓名。');
+          const saved = data.attendance || [];
+          attendanceModal.roster = lesson.roster.map(person => {
+            const previous = saved.find(item => item.matId === match.matId && item.memberId === person.id);
+            return { ...person, status: previous?.status || '', notes: previous?.notes || '' };
+          });
+        } catch (error) {
+          attendanceModal.error = error.message || String(error);
+        } finally {
+          attendanceModal.loading = false;
+        }
+      }
+
+      async function saveAttendanceOnly() {
+        if (attendanceModal.loading || attendanceModal.saving) return;
+        if (!attendanceModal.roster.length || attendanceModal.roster.some(person => !person.status)) {
+          alert('請先完成每一位學員的點名。');
+          return;
+        }
+        attendanceModal.error = '';
+        attendanceModal.saving = true;
+        try {
+          const response = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'saveBasicAttendance',
+              accessToken: lineAccessToken(),
+              matId: attendanceModal.match.matId,
+              entries: attendanceModal.roster.map(person => ({ memberId: person.id, status: person.status, notes: person.notes || '' }))
+            })
+          });
+          const result = await response.json();
+          if (result.status !== 'success') throw new Error(result.message || '點名儲存失敗。');
+          attendanceModal.show = false;
+          alert('逐人點名已儲存；課程仍待完課回報。');
+        } catch (error) {
+          attendanceModal.error = error.message || String(error);
+        } finally {
+          attendanceModal.saving = false;
+        }
+      }
+
       async function submitCheckin() {
         if (!checkinModal.targetMatch || isCheckingIn.value) return;
         if (checkinModal.reportedRevenue === '' || !Number.isFinite(Number(checkinModal.reportedRevenue)) || Number(checkinModal.reportedRevenue) < 0) { alert('請填寫零或正數的實收金額。'); return; }
@@ -810,7 +899,7 @@
       });
 
       return {
-        learningMatches, loadBasicRoster,
+        learningMatches, loadBasicRoster, attendanceModal, openAttendanceModal, saveAttendanceOnly,
         isApproved,
         currentTab,
         userProfile,
@@ -847,4 +936,3 @@
 
 </body>
 </html>
-
