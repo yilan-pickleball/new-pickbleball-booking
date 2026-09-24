@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>匹克球教學工作台 - 教練端</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
@@ -14,6 +14,20 @@
     body { font-family: 'Noto Sans TC', sans-serif; -webkit-tap-highlight-color: transparent; }
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+    /* 手機放大字體時保留可讀寬度，清單獨立捲動。 */
+    #app, main, section, .grid, .flex, .flex-1 { min-width: 0; }
+    #app main, #app section { overflow-wrap: anywhere; }
+    #app button, #app select, #app input, #app textarea { min-width: 0; max-width: 100%; }
+    #app button { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+    #app .grid { grid-template-columns: repeat(auto-fit,minmax(min(100%,9rem),1fr)); }
+    .scroll-list { max-height: min(65vh,40rem); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+    .scroll-dialog { max-height: calc(100dvh - 2rem); overflow-y: auto; overscroll-behavior: contain; }
+    .calendar-scroll { overflow-x: auto; overflow-y: auto; max-height: 70vh; scrollbar-width: thin; }
+    .calendar-grid { display: grid; grid-template-columns: repeat(7,minmax(96px,1fr)); min-width: 672px; }
+    @media (min-width: 800px) { #app { max-width: 1000px !important; } }
+    #app nav { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
+    #app nav button { flex: 0 0 4.6rem; }
   </style>
 </head>
 <body class="bg-slate-100 text-slate-800 antialiased min-h-screen pb-24">
@@ -194,7 +208,7 @@
     </section>
 
     <!-- Tab 2: 學員需求認領 -->
-    <section v-if="currentTab === 'requests'" class="space-y-4">
+    <section v-if="currentTab === 'requests'" class="space-y-4 scroll-list">
       <div class="border-b pb-3">
         <h1 class="text-xl font-bold text-slate-900">學員求課需求池</h1>
         <p class="text-xs text-slate-500 mt-0.5">瀏覽學員提出的預約，點選「我有意願承接」登記意向</p>
@@ -275,7 +289,7 @@
     </section>
 
     <!-- Tab 3: 我的課表 (含完課簽到) -->
-    <section v-if="currentTab === 'schedule'" class="space-y-4">
+    <section v-if="currentTab === 'schedule'" class="space-y-4 scroll-list">
       <div class="border-b pb-3">
         <h1 class="text-xl font-bold text-slate-900">我的正式課表</h1>
         <p class="text-xs text-slate-500 mt-0.5">授課結束後請點擊「完課簽到」回報實收學費與出勤教練</p>
@@ -355,8 +369,8 @@
   </section>
 
 
-  <div v-if="checkinModal.show" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl p-5 max-w-sm w-full shadow-2xl space-y-4">
+  <div v-if="checkinModal.show" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-2xl p-5 max-w-sm w-full shadow-2xl space-y-4 scroll-dialog">
       <div class="text-center">
         <div class="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto text-2xl font-bold mb-2">
           📝
@@ -389,7 +403,8 @@
           <p class="text-[10px] text-slate-400 mt-1">此欄為回報值 reportedRevenue，正式 actualRevenue 由委員會核對。</p>
         </div>
 
-        <div>
+        <div v-if="String(checkinModal.targetMatch?.courseType||'').includes('初階')" class="space-y-2"><p class="font-bold">逐人點名（全部學員都須選擇）</p><div v-for="person in checkinModal.roster" :key="person.id" class="border rounded-lg p-2 space-y-1"><p>{{person.name}} <small>{{person.groupName}}</small><span v-if="person.makeupId" class="text-purple-700"> 補課</span></p><select v-model="person.status" class="border rounded p-2 w-full"><option value="">尚未點名</option><option value="Present">出席</option><option value="Excused">請假</option><option value="Absent">缺席</option></select><input v-model="person.notes" placeholder="個別備註" class="border rounded p-2 w-full"></div></div>
+        <div v-else>
           <label class="font-bold text-slate-700 block mb-1">出席狀況</label>
           <select v-model="checkinModal.attendance" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
             <option value="全員到課">全員到課</option>
@@ -545,7 +560,8 @@
         } catch (err) { substituteLoadError.value = err.message; }
       }
 
-      const checkinModal = reactive({
+      const learningMatches=ref([]);
+      const checkinModal = reactive({roster:[],
         show: false,
         targetMatch: null,
         reportedRevenue: 0,
@@ -703,6 +719,9 @@
 
       function openCheckinModal(match) {
         checkinModal.targetMatch = match;
+        const lesson=learningMatches.value.find(m=>m.matId===match.matId);
+        checkinModal.roster=(lesson?.roster||[]).map(x=>({...x,status:'',notes:''}));
+        if(String(match.courseType||'').includes('初階')) loadBasicRoster(match.matId);
         checkinModal.reportedRevenue = Number(match.expectedFee) || 0;
         checkinModal.assignedCoachNames = match.substituteCoachName ? match.coachNames + '：' + match.substituteCoachName : (match.coachNames || cleanCoachName.value);
         checkinModal.attendance = '全員到課';
@@ -710,9 +729,14 @@
         checkinModal.show = true;
       }
 
+      async function loadBasicRoster(matId){try{const data=await fetch(GAS_API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'getLearningData',accessToken:lineAccessToken()})}).then(r=>r.json());if(data.status!=='success')throw Error(data.message);learningMatches.value=data.matches||[];const lesson=learningMatches.value.find(m=>m.matId===matId);const old=data.attendance||[];checkinModal.roster=(lesson?.roster||[]).map(x=>({...x,status:old.find(a=>a.matId===matId&&a.memberId===x.id)?.status||'',notes:old.find(a=>a.matId===matId&&a.memberId===x.id)?.notes||''}));}catch(e){alert('讀取名冊失敗：'+e.message);}}
       async function submitCheckin() {
         if (!checkinModal.targetMatch || isCheckingIn.value) return;
         if (checkinModal.reportedRevenue === '' || !Number.isFinite(Number(checkinModal.reportedRevenue)) || Number(checkinModal.reportedRevenue) < 0) { alert('請填寫零或正數的實收金額。'); return; }
+        if(String(checkinModal.targetMatch.courseType||'').includes('初階')){
+          if(!checkinModal.roster.length || checkinModal.roster.some(x=>!x.status)){alert('請先完成全部學員的個別點名。');return;}
+          try{const result=await fetch(GAS_API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'saveBasicAttendance',accessToken:lineAccessToken(),matId:checkinModal.targetMatch.matId,entries:checkinModal.roster.map(x=>({memberId:x.id,status:x.status,notes:x.notes||''}))})}).then(r=>r.json());if(result.status!=='success')throw Error(result.message);}catch(e){alert('個別點名儲存失敗：'+e.message);return;}
+        }
         isCheckingIn.value = true;
         try {
           const payload = {
@@ -786,6 +810,7 @@
       });
 
       return {
+        learningMatches, loadBasicRoster,
         isApproved,
         currentTab,
         userProfile,
@@ -822,3 +847,4 @@
 
 </body>
 </html>
+
