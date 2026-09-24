@@ -224,17 +224,17 @@
       </div>
     </section>
 
-    <!-- Tab 2: 長輩代客提單 (24小時制) -->
+    <!-- Tab 2: 代客提單 (24小時制) -->
     <section v-if="currentTab === 'proxy'" class="space-y-5">
       <div class="border-b pb-3">
-        <h1 class="text-xl font-bold text-slate-900">長輩代客提單預約</h1>
-        <p class="text-xs text-slate-500 mt-0.5">針對不擅操作手機長輩，由委員會口頭接洽時代為登記</p>
+        <h1 class="text-xl font-bold text-slate-900">代客提單預約</h1>
+        <p class="text-xs text-slate-500 mt-0.5">由委員會協助學員登記課程需求</p>
       </div>
 
       <div class="bg-slate-50 p-4 border border-slate-200 rounded-xl space-y-3 text-xs">
         <div class="space-y-1">
           <label class="font-bold text-slate-700">學員稱呼 / 姓名 <span class="text-red-500">*</span></label>
-          <input type="text" v-model="proxyForm.studentName" placeholder="例如：李大哥 (電話聯絡)" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none">
+          <input type="text" v-model="proxyForm.studentName" placeholder="例如：王小姐（聯絡人）" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none">
         </div>
 
         <div class="grid grid-cols-2 gap-2">
@@ -249,6 +249,18 @@
             <label class="font-bold text-slate-700">人數</label>
             <input type="number" v-model.number="proxyForm.studentCount" min="1" max="6" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
           </div>
+        </div>
+
+        <div v-if="proxyForm.courseType.includes('初階')" class="space-y-2 rounded-xl border border-purple-200 bg-purple-50/50 p-3">
+          <div>
+            <h2 class="text-xs font-bold text-slate-800">上課學員姓名</h2>
+            <p class="text-[11px] text-slate-600">依人數逐位填寫，不需要分組；這份名冊會供教練點名。</p>
+          </div>
+          <div v-for="(participant, index) in proxyForm.participants" :key="index" class="space-y-1">
+            <label :for="'proxy-participant-' + index" class="block text-xs font-semibold text-slate-700">第 {{ index + 1 }} 位學員 <span class="text-red-500">*</span></label>
+            <input :id="'proxy-participant-' + index" v-model.trim="participant.name" type="text" maxlength="40" :placeholder="'請填寫第 ' + (index + 1) + ' 位姓名'" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-purple-500 focus:outline-none">
+          </div>
+          <p v-if="!Number.isInteger(Number(proxyForm.studentCount)) || Number(proxyForm.studentCount) < 1 || Number(proxyForm.studentCount) > 6" class="text-xs text-red-700">人數請填 1～6 人。</p>
         </div>
 
         <div class="space-y-1">
@@ -791,7 +803,7 @@
 </div>
 
 <script>
-  const { createApp, ref, reactive, computed, onMounted, onUnmounted } = Vue;
+  const { createApp, ref, reactive, computed, watch, onMounted, onUnmounted } = Vue;
 
   const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwe_Xh7I8iOMDBK278mvBIIeXaVa9B3qz8bl2RfdEFT0elPW9Ff7Vg3p2sHm3COUdfkmA/exec";
   const ADMIN_LIFF_ID = "2011535009-IsC8f5XW";
@@ -902,8 +914,16 @@
         date: getTomorrowDate(),
         startTime: '18:00',
         endTime: '19:00',
-        designatedCoach: '', substituteCoachName: '', notes: ''
+        designatedCoach: '', substituteCoachName: '', notes: '',
+        participants: []
       });
+
+      watch(() => proxyForm.studentCount, count => {
+        const size = Number(count);
+        if (!Number.isInteger(size) || size < 1 || size > 6) return;
+        while (proxyForm.participants.length < size) proxyForm.participants.push({ name: '', groupName: '' });
+        if (proxyForm.participants.length > size) proxyForm.participants.splice(size);
+      }, { immediate: true });
 
       const validProxyEndTimes = computed(() => {
         const startIndex = TIME_OPTIONS.indexOf(proxyForm.startTime);
@@ -1230,7 +1250,17 @@
       }
 
       async function submitProxyBooking() {
-        if(String(proxyForm.courseType||'').includes('初階')){const names=prompt('請逐行填寫 '+proxyForm.studentCount+' 位學員；可用「組別|姓名」區分朋友群組。','');if(names===null)return;proxyForm.participants=names.split(/\r?\n/).map(n=>{const parts=n.split('|');return {name:(parts.pop()||'').trim(),groupName:parts.join('|').trim()};}).filter(n=>n.name);if(proxyForm.participants.length!==Number(proxyForm.studentCount)){alert('姓名數量須與人數一致。');return;}}
+        if (String(proxyForm.courseType || '').includes('初階')) {
+          const count = Number(proxyForm.studentCount);
+          if (!Number.isInteger(count) || count < 1 || count > 6 || proxyForm.participants.length !== count) {
+            alert('請先選擇 1～6 位上課學員。');
+            return;
+          }
+          if (proxyForm.participants.some(person => !String(person.name || '').trim())) {
+            alert('請填寫每位上課學員的姓名。');
+            return;
+          }
+        }
 
         try { expectedFeeForRequest(proxyForm); } catch (err) { alert(err.message); return; }
         if (isSubstituteChoice(proxyForm.designatedCoach) && !proxyForm.substituteCoachName.trim()) { alert('請填寫實際代課教練姓名。'); return; }
@@ -1251,7 +1281,8 @@
             timeSlot: timeSlotString,
             level: '待評估',
             studentCount: proxyForm.studentCount,
-            participants: proxyForm.participants || [],
+            participants: String(proxyForm.courseType || '').includes('初階')
+              ? proxyForm.participants.map(person => ({ name: person.name.trim(), groupName: '' })) : [],
             designatedCoach: proxyForm.designatedCoach || '不指定(由委員會推薦)',
             venuePreference: '宜蘭國民運動中心',
             notes: proxyForm.notes,
@@ -1269,6 +1300,7 @@
           if (result.status === 'success') {
             alert(`代客需求單建立成功！單號：${result.reqId}`);
             proxyForm.studentName = '';
+            proxyForm.participants.forEach(person => { person.name = ''; });
             proxyForm.substituteCoachName = '';
             proxyForm.notes = '';
             currentTab.value = 'matching';
