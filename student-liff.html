@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>匹克球課程預約 - 學員端</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
@@ -14,6 +14,20 @@
     body { font-family: 'Noto Sans TC', sans-serif; -webkit-tap-highlight-color: transparent; }
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+    /* 手機放大字體時保留可讀寬度，清單獨立捲動。 */
+    #app, main, section, .grid, .flex, .flex-1 { min-width: 0; }
+    #app main, #app section { overflow-wrap: anywhere; }
+    #app button, #app select, #app input, #app textarea { min-width: 0; max-width: 100%; }
+    #app button { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+    #app .grid { grid-template-columns: repeat(auto-fit,minmax(min(100%,9rem),1fr)); }
+    .scroll-list { max-height: min(65vh,40rem); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+    .scroll-dialog { max-height: calc(100dvh - 2rem); overflow-y: auto; overscroll-behavior: contain; }
+    .calendar-scroll { overflow-x: auto; overflow-y: auto; max-height: 70vh; scrollbar-width: thin; }
+    .calendar-grid { display: grid; grid-template-columns: repeat(7,minmax(96px,1fr)); min-width: 672px; }
+    @media (min-width: 800px) { #app { max-width: 1000px !important; } }
+    #app nav { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
+    #app nav button { flex: 0 0 4.6rem; }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-800 antialiased min-h-screen pb-20">
@@ -72,7 +86,7 @@
               <div>
                 <div class="flex items-center space-x-2">
                   <span class="font-bold text-slate-900 text-sm">初階團體培訓班</span>
-                  <span class="bg-emerald-100 text-emerald-800 text-[10px] font-semibold px-2 py-0.5 rounded-full">4~6人成班</span>
+                  <span class="bg-emerald-100 text-emerald-800 text-[10px] font-semibold px-2 py-0.5 rounded-full">可獨立報名，4~6人成班</span>
                 </div>
                 <p class="text-xs text-slate-500 mt-1">一次報名 5 堂課 (每堂 1 小時)，基礎技巧全覆蓋</p>
               </div>
@@ -82,7 +96,7 @@
               </div>
             </div>
             <div class="mt-2 text-[11px] text-emerald-800 bg-emerald-100/60 rounded px-2 py-1">
-              💵 費用說明：每人 5 堂共 $1,500（每人每堂 $300），4~6 人成班，第一堂現場繳清。全班單堂合計為人數 × $300。
+              💵 費用說明：每人 5 堂共 $1,500（每人每堂 $300），報名可為 1~6 人，委員會合為 4~6 人成班，第一堂現場繳清。全班單堂合計為人數 × $300。
             </div>
           </div>
 
@@ -116,7 +130,7 @@
         <label class="text-sm font-bold text-slate-700">上課人數</label>
         <div v-if="form.courseType === 'basic'" class="flex space-x-3">
           <button 
-            v-for="count in [4, 5, 6]" 
+            v-for="count in [1, 2, 3, 4, 5, 6]" 
             :key="count" 
             type="button" 
             @click="form.studentCount = count"
@@ -140,6 +154,7 @@
         </div>
       </div>
 
+      <div v-if="form.courseType==='basic'" class="space-y-2"><label class="text-sm font-bold">逐人名冊</label><p class="text-xs text-slate-500">每行一位學員；可填「組別|姓名」，例如「A組|王小明」。委員會可與其他組別合班。</p><textarea v-model="basicNamesText" rows="5" placeholder="A組|王小明\nA組|李小華" class="w-full border rounded-lg p-3"></textarea><p class="text-xs">已填 {{basicNamesText.split(/\r?\n/).filter(x=>x.trim()).length}}／{{form.studentCount}} 人</p></div>
       <!-- 日期與 24 小時制精確時間設定 -->
       <div v-if="form.courseType === 'basic'" class="space-y-3">
         <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-900">
@@ -276,7 +291,7 @@
     </section>
 
     <!-- Tab 2: 即時空檔 -->
-    <section v-if="currentTab === 'slots'" class="space-y-4">
+    <section v-if="currentTab === 'slots'" class="space-y-4 scroll-list">
       <div class="border-b pb-3">
         <h1 class="text-xl font-bold text-slate-900">教練已開放空檔</h1>
         <p class="text-xs text-slate-500 mt-0.5">直接挑選合適時段，確認後委員會將直接鎖定排課</p>
@@ -327,7 +342,7 @@
     </section>
 
     <!-- Tab 3: 我的預約 -->
-    <section v-if="currentTab === 'myBookings'" class="space-y-4">
+    <section v-if="currentTab === 'myBookings'" class="space-y-4 scroll-list">
       <div class="border-b pb-3 flex justify-between items-end">
         <div>
           <h1 class="text-xl font-bold text-slate-900">我的預約紀錄</h1>
@@ -390,6 +405,7 @@
       </div>
     </section>
 
+    <section class="space-y-3 mt-6"><div class="flex items-center justify-between"><h2 class="font-bold">個別缺課與補課</h2><button @click="loadMyLearning" class="text-emerald-700 underline text-xs">更新</button></div><div class="scroll-list space-y-2 text-xs"><div v-for="x in myAbsenceSummary" :key="x.memberId" class="border rounded-lg p-2">{{x.name}}：缺席 {{x.absent}}、請假 {{x.excused}}、待補 {{x.pending}}</div><div v-for="x in myLearning.attendance" :key="x.attendanceId" class="border rounded-lg p-3"><p>{{x.lessonDate}} {{x.memberName}}｜{{x.status==='Present'?'出席':x.status==='Excused'?'請假':'缺席'}}</p><button v-if="['Absent','Excused'].includes(x.status) && !myLearning.makeup.some(m=>m.sourceAttendanceId===x.attendanceId&&m.status!=='Rejected')" @click="requestMyMakeup(x)" class="text-emerald-700 underline">申請補課</button></div><div v-for="x in myLearning.makeup" :key="x.makeupId" class="border rounded-lg p-3">{{x.memberName}} 補課：{{x.status==='Pending'?'待審核':x.status==='Approved'?'待排課':x.status==='Scheduled'?'已排課':x.status==='Completed'?'已補課':'未核准'}} <span v-if="x.targetMatId">{{x.targetMatId}}</span></div></div></section>
   </main>
 
   <nav class="bg-white border-t border-slate-200 fixed bottom-0 left-0 right-0 max-w-md mx-auto z-30 flex">
@@ -422,7 +438,7 @@
     </button>
   </nav>
 
-  <div v-if="successModal.show" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+  <div v-if="successModal.show" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
     <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl text-center space-y-4">
       <div class="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto text-2xl font-bold">
         ✓
@@ -587,6 +603,7 @@
           }
         }
         await loadStudentData();
+        await loadMyLearning();
       });
 
       async function loadStudentData() {
@@ -681,6 +698,11 @@
         return response.json();
       }
 
+      const basicNamesText=ref('');
+      const myLearning=reactive({attendance:[],makeup:[]});
+      const myAbsenceSummary=computed(()=>{const map=new Map();for(const x of myLearning.attendance){const item=map.get(x.memberId)||{memberId:x.memberId,name:x.memberName,absent:0,excused:0,pending:0};if(x.status==='Absent')item.absent++;if(x.status==='Excused')item.excused++;if(['Absent','Excused'].includes(x.status)&&!myLearning.makeup.some(m=>m.sourceAttendanceId===x.attendanceId&&m.status==='Completed'))item.pending++;map.set(x.memberId,item);}return [...map.values()];});
+      async function loadMyLearning(){try{const data=await postStudentRequest({action:'getLearningData',accessToken:typeof liff!=='undefined'&&liff.isLoggedIn()?liff.getAccessToken():''});if(data.status==='success'){myLearning.attendance=data.attendance||[];myLearning.makeup=data.makeup||[];}}catch(e){console.error('補課紀錄讀取失敗',e);}}
+      async function requestMyMakeup(x){try{const data=await postStudentRequest({action:'requestBasicMakeup',accessToken:liff.getAccessToken(),attendanceId:x.attendanceId});if(data.status!=='success')throw Error(data.message);await loadMyLearning();alert('已送出補課申請，等待委員會安排。');}catch(e){alert(e.message);}}
       async function submitRequest() {
         if (activeBookingsCount.value >= maxActiveBookings) {
           alert(`您已有 ${maxActiveBookings} 堂進行中預約，已達上限！`);
@@ -701,6 +723,8 @@
           };
 
           if (form.courseType === 'basic') {
+            const participants=basicNamesText.value.split(/\r?\n/).map(x=>{const parts=x.split('|');return {name:(parts.pop()||'').trim(),groupName:parts.join('|').trim()};}).filter(x=>x.name);
+            if(participants.length!==Number(form.studentCount))throw Error('請逐一填寫全部 '+form.studentCount+' 位學員姓名。');
             const countToSubmit = remainingBookingSlots.value;
             const sessions = basicSessions.slice(0, countToSubmit);
             if (countToSubmit <= 0) throw new Error('目前已達 5 堂進行中預約上限。');
@@ -729,6 +753,7 @@
                 preferredDate: session.date,
                 timeSlot: `${session.startTime} - ${session.endTime}`,
                 seriesId,
+                participants,
                 sessionNo: isFullPackage ? i + 1 : '',
                 totalSessions: 5,
                 notes: `${marker}${form.notes ? ' ' + form.notes : ''}`
@@ -908,7 +933,7 @@
         successModal,
         minDate,
         formatUid,
-        loadStudentData,
+        loadStudentData,basicNamesText,myLearning,myAbsenceSummary,loadMyLearning,requestMyMakeup,
         submitRequest,
         bookSlot,
         canCancelSelf,
