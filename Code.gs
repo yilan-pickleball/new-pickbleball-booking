@@ -1,5 +1,5 @@
 /**
- * 匹克球預約與媒合系統 - 後端核心 RESTful API (Code.gs v2.4 - 初階每人五堂1500、場地費預設400)
+ * 匹克球預約與媒合系統 - 後端核心 RESTful API (Code.gs v2.5 - 初階個別點名、補課、三個月保留期)
  * 負責處理全三端 (學員、教練、委員會) 之 GET 讀取與 POST 寫入交易
  * 整合 LockService 防併發衝堂、自動核發單號與財務核算
  */
@@ -118,6 +118,12 @@ function doPost(e) {
       case 'adminProxyRequest':
         result = handleSubmitStudentRequest(payload, true);
         break;
+      case 'getLearningData': result = handleLearningData(payload); break;
+      case 'saveBasicAttendance': result = handleSaveBasicAttendance(payload); break;
+      case 'saveBasicRoster': result = handleSaveBasicRoster(payload); break;
+      case 'requestBasicMakeup': result = handleRequestBasicMakeup(payload); break;
+      case 'reviewBasicMakeup': result = handleReviewBasicMakeup(payload); break;
+      case 'deleteAttendanceRecord': result = deleteAttendanceRecord(payload); break;
       case 'rejectCoach': // ⭐ 新增這兩行
         result = handleRejectCoach(payload);
         break;
@@ -157,7 +163,7 @@ function handleGetStudentData(studentUid) {
 
   const matSheet = ss.getSheetByName('Matches_MAT');
   const matRows = getRowsData(matSheet);
-  const myMatches = matRows.filter(r => r.studentUid === studentUid);
+  const myMatches = matRows.filter(r => r.studentUid === studentUid || parseRoster(r.rosterJson).some(m=>m.ownerUid===studentUid));
 
   // 3. 計算該學員進行中的有效單數 (Pending 或 Confirmed)
   let activeCount = 0;
@@ -730,7 +736,7 @@ function handleAssignSubstitute(p) {
 }
 
 function handleSubmitStudentRequest(p, isProxy) {
-  if (String(p.courseType || '').includes('初階')) expectedLessonFee(p);
+  if (String(p.courseType || '').includes('初階')) rosterFromRequest(p, 'draft');
   const option = substituteOption(p.designatedCoachUid) || substituteOption(p.designatedCoach);
   let name = '';
   if (option) {
@@ -745,7 +751,8 @@ function handleSubmitStudentRequest(p, isProxy) {
   const result = handleSubmitStudentRequestOriginal(p, isProxy);
   if (result.status === 'success') {
     updateFields(SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Requests_REQ'), 'reqId', result.reqId, {
-      designatedCoachUid: p.designatedCoachUid || '', substituteCoachName: name
+      designatedCoachUid: p.designatedCoachUid || '', substituteCoachName: name,
+      seriesId: p.seriesId || '', participantsJson: JSON.stringify(rosterFromRequest(p,result.reqId))
     });
   }
   return result;
@@ -759,13 +766,24 @@ function handleConfirmMatch(p) {
   if (p.reqId && (!request || !['Pending', 'Interested'].includes(request.status) || rows.some(m => m.reqId === p.reqId && !String(m.status).startsWith('Cancelled')))) {
     throw new Error('需求單已處理或不存在，請重新整理。');
   }
+  const linkedIds = Array.from(new Set([p.reqId].concat(Array.isArray(p.linkedReqIds)?p.linkedReqIds:[]).filter(Boolean)));
+  const reqRows = getRowsData(ss.getSheetByName('Requests_REQ'));
+  const linked = linkedIds.map(id=>reqRows.find(r=>r.reqId===id));
+  if (linked.some(r=>!r || !['Pending','Interested'].includes(r.status))) throw new Error('合班需求已處理或不存在。');
+  if (linked.length > 1 && linked.some(r=>!basicLesson(r) || r.preferredDate!==p.lessonDate || r.timeSlot!==p.lessonTime)) throw new Error('僅可合併同一天、同時段的初階需求。');
+  const linkedCount = linked.length ? linked.reduce((n,r)=>n+Number(r.studentCount||0),0) : Number(p.studentCount);
+  if (linked.length > 1 && (linkedCount<4 || linkedCount>6)) throw new Error('合班後須為4～6人。');
+  if (basicLesson(p) && (linkedCount<4 || linkedCount>6)) throw new Error('初階正式班須為4～6人，請先合班。');
+  const roster = linked.flatMap(r=>{const actual=parseRoster(r.participantsJson);return actual.length?actual:Array.from({length:Number(r.studentCount||0)},(_,i)=>({id:r.reqId+':legacy:'+i,name:i===0?r.studentName:'待補姓名 '+(i+1),ownerUid:r.studentUid,groupName:'舊單待確認'}));});
+  const rosterNeedsReview = linked.some(r=>!parseRoster(r.participantsJson).length);
+  if (basicLesson(p) && roster.length!==linkedCount) throw new Error('個別名冊人數與合班人數不符，請補齊姓名。');
   const option = substituteOption(p.coachUid) || substituteOption(p.coachNames);
-  const actor = option ? requireVerifiedAdmin(p) : null;
+  const actor = requireVerifiedAdmin(p);
   const record = {
     reqId: p.reqId || '', lessonDate: p.lessonDate, lessonTime: p.lessonTime, venue: p.venue,
     studentUid: p.studentUid, studentName: p.studentName,
     coachUid: option ? option.coachUid : (p.coachUid || ''), coachNames: option ? option.realName : p.coachNames,
-    courseType: p.courseType, expectedFee: expectedLessonFee(Object.assign({}, p, request || {})), studentCount: Number((request || p).studentCount) || '', status: 'Confirmed',
+    courseType: p.courseType, expectedFee: expectedLessonFee(Object.assign({}, p, request || {}, {studentCount:linkedCount})), studentCount: linkedCount || '', linkedReqIds: JSON.stringify(linkedIds), rosterJson: JSON.stringify(roster), rosterNeedsReview:rosterNeedsReview, classId: linked.length ? linked.map(r=>r.seriesId||r.reqId).sort().join('+') : '', status: 'Confirmed',
     managedBy: actor ? actor.userId : p.managedBy,
     substituteCoachName: option ? requiredSubstituteName(p.substituteCoachName || (request && request.substituteCoachName)) : '',
     notes: lessonNotes(p.notes === undefined ? (request && request.notes) : p.notes)
@@ -773,7 +791,7 @@ function handleConfirmMatch(p) {
   checkAssignmentConflict(rows, record);
   record.matId = generateSequenceId('MAT');
   appendFields(sheet, record);
-  if (p.reqId) updateRowStatus(ss.getSheetByName('Requests_REQ'), 'reqId', p.reqId, 'Confirmed');
+  linkedIds.forEach(id=>updateRowStatus(ss.getSheetByName('Requests_REQ'),'reqId',id,'Confirmed'));
   if (p.slotId) updateRowStatus(ss.getSheetByName('Slots_SLOT'), 'slotId', p.slotId, 'Matched');
   return { status: 'success', matId: record.matId };
 }
@@ -794,6 +812,11 @@ function handleCoachCompleteLesson(p) {
     if (!assigned && actor.userId !== config.INITIAL_SUPER_ADMIN && !admins.some(a => a.adminUid === actor.userId && a.status === 'Approved')) throw new Error('無此課程簽到權限。');
   }
   if (isSubstituteLesson(match)) requiredSubstituteName(match.substituteCoachName);
+  if (basicLesson(match)) {
+    const roster=confirmedRoster(match);
+    const marked=getRowsData(learningSheet('Basic_Attendance')).filter(x=>x.matId===match.matId);
+    if (!roster.length || roster.some(member=>!marked.some(x=>x.memberId===member.id))) throw new Error('請先完成全班逐人點名。');
+  }
   const revenue = moneyValue(p.reportedRevenue === undefined ? p.actualRevenue : p.reportedRevenue, '回報實收');
   updateFields(sheet, 'matId', match.matId, {
     reportedRevenue: revenue, attendance: lessonNotes(p.attendance || '全員到課'), completionNotes: lessonNotes(p.notes),
@@ -840,4 +863,178 @@ function expectedLessonFee(request) {
   // 進階維持原本整堂計價。
   if (Number.isInteger(count) && count >= 1 && count <= 4) return count <= 2 ? 1400 : 1500;
   return moneyValue(request.expectedFee, '預估學費');
+}
+
+// 個別名冊、點名及補課。新工作表在首次使用時建立，不更動既有工作表欄位。
+const LEARNING_HEADERS = {
+  Basic_Attendance: ['attendanceId','matId','lessonDate','memberId','memberName','ownerUid','groupName','status','notes','recordedBy','recordedAt'],
+  Basic_Makeup: ['makeupId','sourceAttendanceId','sourceMatId','memberId','memberName','ownerUid','groupName','status','targetMatId','requestedBy','requestedAt','approvedBy','approvedAt','notes']
+};
+function learningSheet(name) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+    sheet.getRange(1,1,1,LEARNING_HEADERS[name].length).setValues([LEARNING_HEADERS[name]]);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+function basicLesson(m) { return String(m.courseType || '').includes('初階'); }
+function parseRoster(value) {
+  if (Array.isArray(value)) return value;
+  try { const result = JSON.parse(value || '[]'); return Array.isArray(result) ? result : []; }
+  catch (_) { return []; }
+}
+function cleanRosterMember(m, fallbackId, owner) {
+  const name = String(m.name || '').trim();
+  const groupName = String(m.groupName || '').trim();
+  if (!name || name.length > 40 || groupName.length > 40) throw new Error('每位學員姓名與組別請填寫 40 字以內。');
+  return { id: String(m.id || fallbackId).slice(0,100), name: name,
+    ownerUid: String(owner || m.ownerUid || '').slice(0,100), groupName: groupName };
+}
+function rosterFromRequest(p, reqId) {
+  if (!String(p.courseType || '').includes('初階')) return [];
+  const source = parseRoster(p.participants);
+  const count = Number(p.studentCount);
+  if (!Number.isInteger(count) || count < 1 || count > 6 || source.length !== count) {
+    throw new Error('初階報名請逐一填寫每位學員姓名，人數須為 1～6 人。');
+  }
+  const prefix = String(p.seriesId || reqId).replace(/[^a-zA-Z0-9_-]/g,'').slice(0,60);
+  return source.map((m,i) => cleanRosterMember(m, prefix + ':' + (i+1), p.studentUid));
+}
+function confirmedRoster(match) {
+  const base = parseRoster(match.rosterJson);
+  const extra = getRowsData(learningSheet('Basic_Makeup'))
+    .filter(x => x.targetMatId === match.matId && x.status === 'Scheduled')
+    .map(x => ({ id: x.memberId, name: x.memberName, ownerUid: x.ownerUid, groupName: x.groupName, makeupId: x.makeupId }));
+  return base.concat(extra);
+}
+function handleLearningData(p) {
+  const actor = verifiedLineActor(p);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const config = getConfigMap();
+  const admins = getRowsData(ss.getSheetByName('Admins'));
+  const isAdmin = actor.userId === config.INITIAL_SUPER_ADMIN || admins.some(a => a.adminUid === actor.userId && a.status === 'Approved');
+  const coach = getRowsData(ss.getSheetByName('Coaches')).find(c => c.coachUid === actor.userId && c.status === 'Approved');
+  const matches = getRowsData(ss.getSheetByName('Matches_MAT'));
+  const visible = matches.filter(m => basicLesson(m) && (isAdmin || (coach && (String(m.coachUid || '').split(/[,、]/).includes(actor.userId) || (!m.coachUid && String(m.coachNames || '').includes(coach.realName)))) || (isSubstituteLesson(m) && SUBSTITUTE_DELEGATES.includes(actor.userId)) || m.studentUid === actor.userId || parseRoster(m.rosterJson).some(x => x.ownerUid === actor.userId)));
+  const ids = new Set(visible.map(m => m.matId));
+  const attendance = getRowsData(learningSheet('Basic_Attendance')).filter(x => ids.has(x.matId) && (isAdmin || coach || SUBSTITUTE_DELEGATES.includes(actor.userId) || x.ownerUid === actor.userId));
+  const makeup = getRowsData(learningSheet('Basic_Makeup')).filter(x => isAdmin || ids.has(x.sourceMatId) && (coach || SUBSTITUTE_DELEGATES.includes(actor.userId) || x.ownerUid === actor.userId));
+  return {status:'success', matches:visible.map(m => {
+    const privileged = isAdmin || coach || SUBSTITUTE_DELEGATES.includes(actor.userId);
+    const view = privileged ? Object.assign({},m) : {matId:m.matId,lessonDate:m.lessonDate,lessonTime:m.lessonTime,courseType:m.courseType,status:m.status};
+    view.roster=confirmedRoster(m).filter(x=>privileged || x.ownerUid===actor.userId);
+    return view;
+  }), attendance:attendance, makeup:makeup, isAdmin:!!isAdmin};
+}
+function requireLessonTeacher(p,match) {
+  if (isSubstituteLesson(match)) return requireSubstituteDelegate(p);
+  const actor = verifiedLineActor(p);
+  const coach = getRowsData(SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Coaches')).find(c => c.coachUid === actor.userId && c.status === 'Approved');
+  const assigned = String(match.coachUid || '').split(/[,、]/).includes(actor.userId) || (coach && !match.coachUid && String(match.coachNames || '').includes(coach.realName));
+  if (!assigned) return requireVerifiedAdmin(p);
+  return actor;
+}
+function handleSaveBasicAttendance(p) {
+  const match = getRowsData(SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Matches_MAT')).find(m => m.matId === p.matId);
+  if (!match || !basicLesson(match) || !['Confirmed','Completed','Settled'].includes(match.status)) throw new Error('找不到可點名的初階課程。');
+  const actor = requireLessonTeacher(p,match);
+  if (match.rosterNeedsReview === true || String(match.rosterNeedsReview).toLowerCase()==='true') throw new Error('舊課程名冊尚待委員會確認姓名。');
+  const roster = confirmedRoster(match);
+  if (!roster.length) throw new Error('請先由委員會建立個別學員名冊。');
+  const entries = Array.isArray(p.entries) ? p.entries : [];
+  if (entries.length !== roster.length || new Set(entries.map(e => e.memberId)).size !== roster.length) throw new Error('請逐一點名全部學員。');
+  const sheet = learningSheet('Basic_Attendance'), old = getRowsData(sheet);
+  const makeups = getRowsData(learningSheet('Basic_Makeup'));
+  roster.forEach(member => {
+    const e = entries.find(x => x.memberId === member.id);
+    if (!e || !['Present','Excused','Absent'].includes(e.status)) throw new Error('點名狀態不完整。');
+    const id = match.matId + ':' + member.id;
+    const existing = old.find(x => x.attendanceId === id);
+    if (existing && existing.status !== e.status && makeups.some(x => x.sourceAttendanceId === id && !['Rejected','Completed'].includes(x.status))) throw new Error('已有待處理補課，請先處理後再修改缺課狀態。');
+  });
+  roster.forEach(member => {
+    const e = entries.find(x => x.memberId === member.id), id = match.matId + ':' + member.id;
+    const fields = {matId:match.matId,lessonDate:match.lessonDate,memberId:member.id,memberName:member.name,ownerUid:member.ownerUid || '',groupName:member.groupName || '',status:e.status,notes:lessonNotes(e.notes),recordedBy:actor.userId,recordedAt:new Date().toISOString()};
+    if (old.some(x => x.attendanceId === id)) updateFields(sheet,'attendanceId',id,fields);
+    else appendFields(sheet,Object.assign({attendanceId:id},fields));
+    if (member.makeupId && e.status === 'Present') updateFields(learningSheet('Basic_Makeup'),'makeupId',member.makeupId,{status:'Completed'});
+  });
+  return {status:'success',message:'個別點名已儲存。'};
+}
+function handleSaveBasicRoster(p) {
+  const actor = requireVerifiedAdmin(p);
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Matches_MAT');
+  const match = getRowsData(sheet).find(m => m.matId === p.matId);
+  if (!match || !basicLesson(match) || match.status !== 'Confirmed') throw new Error('僅能編輯尚未完課的初階名冊。');
+  if (getRowsData(learningSheet('Basic_Attendance')).some(x => x.matId === match.matId)) throw new Error('已有點名紀錄，請先處理點名再調整名冊。');
+  const roster = parseRoster(p.roster);
+  if (roster.length < 4 || roster.length > 6) throw new Error('正式初階班名冊須為 4～6 人。');
+  const cleaned = roster.map((m,i) => cleanRosterMember(m,match.matId + ':' + (i+1),m.ownerUid || match.studentUid));
+  if (new Set(cleaned.map(x=>x.id)).size !== cleaned.length) throw new Error('名冊識別重複。');
+  updateFields(sheet,'matId',match.matId,{rosterJson:JSON.stringify(cleaned),studentCount:cleaned.length,expectedFee:cleaned.length*300,rosterNeedsReview:false,rosterUpdatedBy:actor.userId});
+  return {status:'success',message:'名冊已更新。'};
+}
+function handleRequestBasicMakeup(p) {
+  const actor = verifiedLineActor(p);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const source = getRowsData(learningSheet('Basic_Attendance')).find(x => x.attendanceId === p.attendanceId);
+  if (!source || !['Absent','Excused'].includes(source.status)) throw new Error('須有個別缺課或請假紀錄才能申請補課。');
+  const admins = getRowsData(ss.getSheetByName('Admins'));
+  const admin = actor.userId === getConfigMap().INITIAL_SUPER_ADMIN || admins.some(a=>a.adminUid===actor.userId && a.status==='Approved');
+  if (!admin && source.ownerUid !== actor.userId) throw new Error('只能為自己的學員提出補課。');
+  const sheet = learningSheet('Basic_Makeup');
+  if (getRowsData(sheet).some(x => x.sourceAttendanceId === source.attendanceId && x.status !== 'Rejected')) throw new Error('此缺課已有補課申請。');
+  const makeupId = generateSequenceId('MAKEUP');
+  appendFields(sheet,{makeupId:makeupId,sourceAttendanceId:source.attendanceId,sourceMatId:source.matId,memberId:source.memberId,memberName:source.memberName,ownerUid:source.ownerUid,groupName:source.groupName,status:'Pending',targetMatId:'',requestedBy:actor.userId,requestedAt:new Date().toISOString(),approvedBy:'',approvedAt:'',notes:lessonNotes(p.notes)});
+  return {status:'success',makeupId:makeupId};
+}
+function handleReviewBasicMakeup(p) {
+  const actor = requireVerifiedAdmin(p);
+  const sheet = learningSheet('Basic_Makeup');
+  const item = getRowsData(sheet).find(x => x.makeupId === p.makeupId);
+  if (!item || !['Pending','Approved','Scheduled'].includes(item.status)) throw new Error('找不到待處理補課申請。');
+  if (!['Approved','Rejected','Scheduled'].includes(p.status)) throw new Error('補課狀態不正確。');
+  let target = '';
+  if (p.status === 'Scheduled') {
+    target = getRowsData(SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Matches_MAT')).find(m=>m.matId===p.targetMatId);
+    if (!target || target.status !== 'Confirmed' || !basicLesson(target)) throw new Error('請選擇尚未上課的初階課程。');
+    if (target.matId === item.sourceMatId || target.lessonDate <= String(getRowsData(learningSheet('Basic_Attendance')).find(x=>x.attendanceId===item.sourceAttendanceId)?.lessonDate || '')) throw new Error('補課須安排在原缺課日之後。');
+    if (confirmedRoster(target).length >= 6) throw new Error('補課班已達六人上限。');
+    if (confirmedRoster(target).some(x=>x.id===item.memberId)) throw new Error('學員已在該堂名冊中。');
+  }
+  updateFields(sheet,'makeupId',item.makeupId,{status:p.status,targetMatId:target ? target.matId : '',approvedBy:actor.userId,approvedAt:new Date().toISOString(),notes:lessonNotes(p.notes === undefined ? item.notes : p.notes)});
+  return {status:'success',message:'補課狀態已更新。'};
+}
+function deleteAttendanceRecord(p) {
+  requireVerifiedAdmin(p);
+  const sheet = learningSheet('Basic_Attendance');
+  const row = getRowIndex(sheet,'attendanceId',p.attendanceId);
+  if (row < 2) throw new Error('找不到點名紀錄。');
+  if (getRowsData(learningSheet('Basic_Makeup')).some(x=>x.sourceAttendanceId===p.attendanceId && !['Rejected','Completed'].includes(x.status))) throw new Error('仍有待處理補課，不能刪除原點名。');
+  sheet.deleteRow(row);
+  return {status:'success',message:'點名紀錄已刪除。'};
+}
+function purgeOldBasicAttendance() {
+  const sheet=learningSheet('Basic_Attendance');
+  const rows=getRowsData(sheet);
+  const makeups=getRowsData(learningSheet('Basic_Makeup'));
+  const today=Utilities.formatDate(new Date(),'Asia/Taipei','yyyy-MM-dd');
+  const cutoff=new Date(today+'T00:00:00+08:00');
+  cutoff.setUTCMonth(cutoff.getUTCMonth()-3);
+  const before=Utilities.formatDate(cutoff,'Asia/Taipei','yyyy-MM-dd');
+  let removed=0;
+  for(let i=rows.length-1;i>=0;i--){
+    const x=rows[i];
+    if (String(x.lessonDate||'') < before && !makeups.some(m=>m.sourceAttendanceId===x.attendanceId && !['Rejected','Completed'].includes(m.status))){sheet.deleteRow(i+2);removed++;}
+  }
+  return removed;
+}
+// 部署後於 Apps Script 執行一次，安裝每日自動清理；重跑不會重複安裝。
+function setupBasicAttendanceRetention() {
+  if (!ScriptApp.getProjectTriggers().some(t=>t.getHandlerFunction()==='purgeOldBasicAttendance'))
+    ScriptApp.newTrigger('purgeOldBasicAttendance').timeBased().everyDays(1).atHour(3).inTimezone('Asia/Taipei').create();
+  return '已設定每日清理三個月前的點名紀錄';
 }
