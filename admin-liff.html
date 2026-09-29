@@ -220,6 +220,21 @@
             <span v-if="isProcessing" class="animate-spin mr-1">🔄</span>
             <span>確認媒合並排程 (寫入試算表 MAT-)</span>
           </button>
+          <div class="grid grid-cols-2 gap-2">
+            <button @click="openRequestResolution(req, 'return')" :disabled="isProcessing" class="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 disabled:opacity-40">退回重填</button>
+            <button @click="openRequestResolution(req, 'cancel')" :disabled="isProcessing" class="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 disabled:opacity-40">取消需求</button>
+          </div>
+        </div>
+      </div>
+      <div class="border-t pt-4">
+        <button @click="requestHistoryExpanded = !requestHistoryExpanded" class="w-full flex items-center justify-between rounded-lg border bg-white px-3 py-2 text-xs font-bold text-slate-700"><span>退回／已取消需求（{{ resolvedRequests.length }}）</span><span>{{ requestHistoryExpanded ? '收合 ▲' : '展開 ▼' }}</span></button>
+        <div v-if="requestHistoryExpanded" class="mt-2 max-h-80 overflow-y-auto space-y-2">
+          <div v-for="req in resolvedRequests" :key="req.reqId" class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs space-y-1">
+            <p><strong class="font-mono">{{ req.reqId }}</strong> · {{ req.studentName }} · {{ req.preferredDate }} {{ req.timeSlot }}</p>
+            <p class="font-bold text-slate-700">{{ req.status === 'Returned_Admin' ? '已退回重填' : req.status === 'Cancelled_User' ? '學員取消' : '委員會取消' }}</p>
+            <p v-if="req.resolutionReason" class="break-words text-slate-600">原因：{{ req.resolutionReason }}</p>
+          </div>
+          <p v-if="!resolvedRequests.length" class="p-3 text-xs text-slate-500">目前沒有退回或取消的需求。</p>
         </div>
       </div>
     </section>
@@ -739,6 +754,18 @@
 
   </main>
 
+  <div v-if="requestResolution.show" class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+    <div role="dialog" aria-modal="true" aria-label="處理待媒合需求" class="bg-white rounded-xl p-5 w-full max-w-sm space-y-3 text-xs max-h-[90vh] overflow-y-auto">
+      <h2 class="font-bold text-base">{{ requestResolution.action === 'return' ? '退回重填需求' : '取消需求' }}</h2>
+      <p class="text-slate-700">{{ requestResolution.request?.reqId }} · {{ requestResolution.request?.studentName }}</p>
+      <p class="text-slate-500">{{ requestResolution.action === 'return' ? '原單會保留並退出媒合池，填寫人可重新提交正確需求。' : '原單會保留並退出媒合池，不會刪除試算表資料。' }}</p>
+      <label class="block font-bold">原因 *
+        <textarea v-model.trim="requestResolution.reason" maxlength="1000" rows="3" class="w-full mt-1 p-2 border rounded-lg" placeholder="請說明需要重填或取消的原因"></textarea>
+      </label>
+      <button @click="submitRequestResolution" :disabled="requestResolution.saving || !requestResolution.reason.trim()" class="w-full rounded-lg bg-red-700 px-3 py-2.5 font-bold text-white disabled:opacity-40">{{ requestResolution.saving ? '處理中…' : '確認' + (requestResolution.action === 'return' ? '退回' : '取消') }}</button>
+      <button @click="requestResolution.show = false" :disabled="requestResolution.saving" class="w-full rounded-lg bg-slate-100 px-3 py-2 text-slate-700 disabled:opacity-40">返回</button>
+    </div>
+  </div>
   <div v-if="substituteEditor.show" class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
     <div role="dialog" aria-modal="true" aria-label="安排代課" class="bg-white rounded-xl p-5 w-full max-w-sm space-y-3 text-xs max-h-[90vh] overflow-y-auto">
       <h2 class="font-bold text-base">安排／修改代課</h2>
@@ -862,6 +889,8 @@
 
       const rawRequests = ref([]);
       const allMatches = ref([]);
+      const requestHistoryExpanded = ref(false);
+      const requestResolution = reactive({ show: false, request: null, action: 'return', reason: '', saving: false });
 
       // 使用明確時區與固定 YYYY-MM-DD 格式，不受裝置所在地影響。
       const taipeiDateFormatter = new Intl.DateTimeFormat('en-US', {
@@ -1027,6 +1056,9 @@
         return rawRequests.value
           .filter(r => r.status === 'Pending' || r.status === 'Interested');
       });
+      const resolvedRequests = computed(() => rawRequests.value
+        .filter(r => ['Returned_Admin', 'Cancelled_Admin', 'Cancelled_User'].includes(r.status))
+        .sort((a, b) => String(b.resolvedAt || b.updatedAt || '').localeCompare(String(a.resolvedAt || a.updatedAt || ''))));
 
       const completedMatches = computed(() => {
         return allMatches.value.filter(m => m.status === 'Completed');
@@ -1295,6 +1327,41 @@
           alert('撮合異常：' + err.toString());
         } finally {
           isProcessing.value = false;
+        }
+      }
+
+      function openRequestResolution(req, action) {
+        if (!['Pending', 'Interested'].includes(req.status)) return;
+        requestResolution.request = req;
+        requestResolution.action = action;
+        requestResolution.reason = '';
+        requestResolution.show = true;
+      }
+
+      async function submitRequestResolution() {
+        if (requestResolution.saving || !requestResolution.request) return;
+        const reason = requestResolution.reason.trim();
+        if (!reason) { alert('請填寫退回或取消原因。'); return; }
+        requestResolution.saving = true;
+        try {
+          const res = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'resolvePendingRequest', accessToken: lineAccessToken(),
+              reqId: requestResolution.request.reqId, resolution: requestResolution.action, reason
+            })
+          });
+          const result = await res.json();
+          if (result.status !== 'success') throw new Error(result.message || '處理需求失敗');
+          requestResolution.show = false;
+          requestHistoryExpanded.value = true;
+          await loadAdminData();
+          alert(result.message);
+        } catch (err) {
+          alert('處理需求失敗：' + err.message);
+        } finally {
+          requestResolution.saving = false;
         }
       }
 
@@ -1671,6 +1738,7 @@
         approvedCoachesNames,
         approvedCoachesList,
         pendingRequests,
+        requestHistoryExpanded, requestResolution, resolvedRequests,
         expectedFeeForRequest, expectedFeeForMatch,
         allMatches,
         scheduleGroups,
@@ -1698,6 +1766,7 @@
         onSelectMatch,
         loadAdminData,
         confirmMatch,
+        openRequestResolution, submitRequestResolution,
         submitProxyBooking,
         markCompletedAdmin,
         forceCancel,
