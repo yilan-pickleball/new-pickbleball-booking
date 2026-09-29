@@ -624,12 +624,13 @@
               </span>
             </div>
             <p class="text-slate-800">收入 NT${{ Number(acc.actualRevenue).toLocaleString() }} - 場地 NT${{ Number(acc.venueCost).toLocaleString() }} = 酬勞 NT${{ Number(acc.netCoachPool).toLocaleString() }}</p>
-            <p class="text-slate-500 text-[11px]">執教：{{ acc.coachList }} (每人 NT${{ Number(acc.perCoachPay).toLocaleString() }})</p>
+            <p class="text-slate-500 text-[11px]">執教：{{ acc.coachList }} <span v-if="acc.payrollGroupId" class="font-bold text-purple-700">· 已加入跨堂均分組，實際應發請看薪資清冊</span><span v-else>（本堂每人 NT${{ Number(acc.perCoachPay).toLocaleString() }}）</span></p>
           </div>
         </div>
       </div>
 
       <div v-if="accountingSubView === 'payroll'" class="space-y-4 scroll-list">
+        <p v-if="!payrollApiReady" class="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-bold text-amber-900">請先部署新版 Code.gs，再重新整理以使用跨堂均分與逐人發放功能。</p>
         <div class="grid grid-cols-2 gap-3">
           <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
             <span class="text-[11px] text-amber-700 font-bold block">待發放薪資總額</span>
@@ -638,6 +639,35 @@
           <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-center">
             <span class="text-[11px] text-emerald-700 font-bold block">已發放結清總額</span>
             <span class="text-lg font-extrabold text-emerald-900">NT$ {{ totalPaidPayout.toLocaleString() }}</span>
+          </div>
+        </div>
+
+        <div v-if="payrollApiReady" class="rounded-xl border border-purple-200 bg-purple-50/60 p-3 space-y-3 text-xs">
+          <div>
+            <h2 class="font-bold text-purple-900">圈選課程建立跨堂均分組</h2>
+            <p class="text-slate-600 mt-1">可跨日期、跨教練勾選尚未發放的課程。各堂「實收－場地費」合計後，由組內不重複的教練平均分配；未勾選仍逐堂計算。</p>
+          </div>
+          <div class="max-h-64 overflow-y-auto space-y-1.5 pr-1">
+            <label v-for="acc in ungroupedPayrollAccs" :key="acc.accId" class="flex items-start gap-2 rounded-lg border border-purple-100 bg-white p-2 cursor-pointer">
+              <input type="checkbox" v-model="selectedPayrollAccIds" :value="String(acc.accId)" class="mt-0.5 shrink-0 accent-purple-700">
+              <span class="min-w-0 break-words"><strong class="font-mono text-purple-800">{{ acc.accId }}</strong> · {{ acc.lessonDate }} · {{ acc.coachList }}<br><span class="text-slate-600">本堂可分酬勞 NT$ {{ Number(acc.netCoachPool).toLocaleString() }}</span></span>
+            </label>
+            <p v-if="!ungroupedPayrollAccs.length" class="text-slate-500">目前沒有可建立均分組的待發放課程。</p>
+          </div>
+          <div v-if="selectedPayrollAccIds.length" class="rounded-lg bg-white border border-purple-200 p-2 font-bold text-purple-900">
+            已選 {{ selectedPayrollAccIds.length }} 堂 · 合計 NT$ {{ payrollSelectionPreview.total.toLocaleString() }} · {{ payrollSelectionPreview.coaches.length }} 位教練
+            <p v-if="payrollSelectionPreview.coaches.length" class="mt-1 font-normal text-slate-700">{{ payrollSelectionPreview.coaches.map((name, i) => name + ' NT$ ' + payrollSelectionPreview.amounts[i].toLocaleString()).join('、') }}</p>
+          </div>
+          <button @click="createPayrollGroup" :disabled="payrollBusy || selectedPayrollAccIds.length < 2 || payrollSelectionPreview.coaches.length < 2" class="w-full rounded-lg bg-purple-700 px-3 py-2.5 font-bold text-white disabled:opacity-40">確認建立均分組</button>
+        </div>
+
+        <div v-if="payrollGroups.length" class="space-y-2">
+          <h2 class="text-xs font-bold text-slate-500">已建立的跨堂均分組</h2>
+          <div v-for="group in payrollGroups" :key="group.groupId" class="rounded-xl border border-purple-200 bg-white p-3 text-xs space-y-1">
+            <div class="flex flex-wrap justify-between gap-2"><strong class="text-purple-800">{{ group.accIds.length }} 堂合併 · {{ group.coachNames.length }} 位教練</strong><strong>酬勞池 NT$ {{ group.totalPool.toLocaleString() }}</strong></div>
+            <p class="font-mono text-[10px] break-all text-slate-500">{{ group.accIds.join('、') }}</p>
+            <p class="text-slate-700">{{ group.items.map(i => i.coachName + ' NT$ ' + Number(i.amount).toLocaleString() + (i.isPaid ? '（已發）' : '')).join('、') }}</p>
+            <button v-if="group.items.every(i => !i.isPaid)" @click="dissolvePayrollGroup(group)" :disabled="payrollBusy" class="text-purple-700 underline font-bold disabled:opacity-40">拆除均分組，恢復逐堂計算</button>
           </div>
         </div>
 
@@ -683,14 +713,16 @@
                     <span class="font-mono font-bold text-[10px] text-purple-700">{{ item.accId }}</span>
                     <strong class="text-slate-800 font-mono">{{ item.lessonDate }}</strong>
                   </div>
-                  <p class="text-[11px] text-slate-500 mt-0.5">應得分潤：<strong class="text-slate-900">NT$ {{ Number(item.amount).toLocaleString() }}</strong></p>
+                  <p class="text-[11px] text-slate-500 mt-0.5">{{ item.isGrouped ? '跨堂均分' : '單堂酬勞' }}：<strong class="text-slate-900">NT$ {{ Number(item.amount).toLocaleString() }}</strong><span v-if="item.isGrouped"> · {{ item.accIds.length }} 堂</span></p>
+                  <p v-if="item.isGrouped" class="text-[10px] text-slate-400 break-all">{{ item.accIds.join('、') }}</p>
                 </div>
 
                 <div>
                   <button 
                     v-if="!item.isPaid"
                     @click="markPayoutCompleted(item)"
-                    class="py-1.5 px-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-lg text-xs shadow-sm transition"
+                    :disabled="payrollBusy"
+                    class="py-1.5 px-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-lg text-xs shadow-sm transition disabled:opacity-40"
                   >
                     標記已發放
                   </button>
@@ -904,6 +936,10 @@
       const rawCoaches = ref([]);
       const rawAdmins = ref([]);
       const rawAccounting = ref([]);
+      const rawPayroll = ref([]);
+      const payrollApiReady = ref(false);
+      const payrollBusy = ref(false);
+      const selectedPayrollAccIds = ref([]);
 
       const timeOptions = TIME_OPTIONS;
 
@@ -1017,31 +1053,40 @@
         approvedCoachesNames.value.forEach(name => {
           map[name] = { name: name, pendingAmount: 0, paidAmount: 0, items: [] };
         });
-
-        rawAccounting.value.forEach(acc => {
-          const coaches = (acc.coachList || '').split(/[,、]/).map(s => s.trim()).filter(Boolean);
-          const payAmount = Number(acc.perCoachPay || 0);
-          const isPaid = (acc.settlementStatus === 'Settled' || acc.status === 'Settled');
-
-          coaches.forEach(cName => {
-            if (!map[cName]) {
-              map[cName] = { name: cName, pendingAmount: 0, paidAmount: 0, items: [] };
-            }
-            map[cName].items.unshift({
-              accId: acc.accId,
-              lessonDate: acc.lessonDate,
-              amount: payAmount,
-              isPaid: isPaid
-            });
-            if (isPaid) {
-              map[cName].paidAmount += payAmount;
-            } else {
-              map[cName].pendingAmount += payAmount;
-            }
-          });
+        rawPayroll.value.forEach(item => {
+          const name = item.coachName;
+          if (!map[name]) map[name] = { name, pendingAmount: 0, paidAmount: 0, items: [] };
+          map[name].items.unshift({ ...item, accId: item.accIds[0], lessonDate: item.lessonDates[0] });
+          if (item.isPaid) map[name].paidAmount += Number(item.amount || 0);
+          else map[name].pendingAmount += Number(item.amount || 0);
         });
-
         return Object.values(map);
+      });
+
+      const ungroupedPayrollAccs = computed(() => rawAccounting.value.filter(acc =>
+        acc.accId && !acc.payrollGroupId && acc.settlementStatus !== 'Settled' && acc.status !== 'Settled' &&
+        rawPayroll.value.filter(item => item.accIds.length === 1 && item.accIds[0] === String(acc.accId)).every(item => !item.isPaid)
+      ));
+      const payrollSelectionPreview = computed(() => {
+        const ids = new Set(selectedPayrollAccIds.value);
+        const rows = ungroupedPayrollAccs.value.filter(acc => ids.has(String(acc.accId)));
+        const total = rows.reduce((sum, acc) => sum + Number(acc.netCoachPool || 0), 0);
+        const coaches = [...new Set(rows.flatMap(acc => String(acc.coachList || '').split(/[,、]/).map(s => s.trim()).filter(Boolean)))].sort();
+        const base = coaches.length ? Math.floor(total / coaches.length) : 0;
+        const remainder = Math.round(total - base * coaches.length);
+        return { total, coaches, amounts: coaches.map((_, i) => base + (i < remainder ? 1 : 0)) };
+      });
+      const payrollGroups = computed(() => {
+        const groups = new Map();
+        rawPayroll.value.filter(item => item.isGrouped).forEach(item => {
+          if (!groups.has(item.groupId)) groups.set(item.groupId, {
+            groupId: item.groupId, accIds: item.accIds, totalPool: Number(item.totalPool), coachNames: [], items: []
+          });
+          const group = groups.get(item.groupId);
+          group.coachNames.push(item.coachName);
+          group.items.push(item);
+        });
+        return [...groups.values()];
       });
 
       const totalPendingPayout = computed(() => {
@@ -1189,6 +1234,9 @@
             rawSlots.value = data.slots || [];
             rawAdmins.value = data.admins || [];
             rawAccounting.value = data.accounting || [];
+            payrollApiReady.value = Array.isArray(data.payroll);
+            rawPayroll.value = data.payroll || [];
+            selectedPayrollAccIds.value = selectedPayrollAccIds.value.filter(id => ungroupedPayrollAccs.value.some(a => String(a.accId) === id));
           } else if (data.status === 'unauthorized') {
             isAdminApproved.value = false;
           }
@@ -1509,21 +1557,50 @@
         }
       }
 
-      async function markPayoutCompleted(item) {
+      async function payrollPost(payload) {
+        const res = await fetch(GAS_API_URL, {
+          method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ ...payload, accessToken: lineAccessToken() })
+        });
+        const result = await res.json();
+        if (result.status !== 'success') throw new Error(result.message || '薪資操作失敗');
+        return result;
+      }
+
+      async function createPayrollGroup() {
+        if (payrollBusy.value || selectedPayrollAccIds.value.length < 2 || payrollSelectionPreview.value.coaches.length < 2) return;
+        payrollBusy.value = true;
         try {
-          const res = await fetch(GAS_API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({
-              action: 'updatePayrollStatus',
-              accId: item.accId
-            })
-          });
-          const result = await res.json();
+          const result = await payrollPost({ action: 'createPayrollGroup', accIds: selectedPayrollAccIds.value });
+          selectedPayrollAccIds.value = [];
+          await loadAdminData();
+          alert(`均分組已建立：NT$ ${Number(result.totalPool).toLocaleString()} 由 ${result.coachCount} 位教練平均分配。`);
+        } catch (err) { alert('建立均分組失敗：' + err.message); }
+        finally { payrollBusy.value = false; }
+      }
+
+      async function dissolvePayrollGroup(group) {
+        if (payrollBusy.value || !confirm('確定拆除這組跨堂均分，恢復各堂獨立計算？')) return;
+        payrollBusy.value = true;
+        try {
+          const result = await payrollPost({ action: 'dissolvePayrollGroup', groupId: group.groupId });
+          await loadAdminData();
+          alert(result.message);
+        } catch (err) { alert('拆除均分組失敗：' + err.message); }
+        finally { payrollBusy.value = false; }
+      }
+
+      async function markPayoutCompleted(item) {
+        if (payrollBusy.value || !confirm(`確定已發放 ${item.coachName} NT$ ${Number(item.amount).toLocaleString()}？`)) return;
+        payrollBusy.value = true;
+        try {
+          const result = await payrollPost({ action: 'markPayrollPaid', payKey: item.payKey });
           alert(result.message || '該筆薪酬已標記發放結清！');
           await loadAdminData();
         } catch (err) {
           alert('操作異常：' + err.toString());
+        } finally {
+          payrollBusy.value = false;
         }
       }
 
@@ -1605,6 +1682,8 @@
         pendingCoaches,
         pendingAdmins,
         rawAccounting,
+        rawPayroll, payrollApiReady, payrollBusy, selectedPayrollAccIds,
+        ungroupedPayrollAccs, payrollSelectionPreview, payrollGroups,
         netCoachPool,
         perCoachPay,
         coachPayrollSummaries,
@@ -1626,6 +1705,7 @@
         approveAdmin,
         generateAccountingSlip,
         markPayoutCompleted,
+        createPayrollGroup, dissolvePayrollGroup,
         applyForAdmin,
         copyUid
       };
