@@ -372,6 +372,8 @@
             <p>📅 時間：<strong class="font-mono">{{ b.date }} ({{ b.timeSlot }})</strong></p>
             <p>🏸 教練：{{ b.coach || '待委員會配對推薦' }}</p>
             <p>📍 場地：{{ b.venue }}</p>
+            <p v-if="b.resolutionReason && ['Returned_Admin', 'Cancelled_Admin'].includes(b.status)" class="rounded-lg bg-amber-50 px-2 py-1.5 text-amber-900 break-words">處理原因：{{ b.resolutionReason }}</p>
+            <p v-if="b.status === 'Returned_Admin'" class="font-semibold text-amber-800">請確認原因後重新提交正確需求。</p>
             <p v-if="isBasicCourse(b.courseTitle)" class="text-emerald-700 font-semibold">💵 套課費：每人 5 堂共 NT$ 1,500（每人每堂 NT$300；第一堂繳清；本列為單一課次）</p>
             <p v-else class="text-emerald-700 font-semibold">💵 現金應繳：NT$ {{ Number(b.fee || 1400).toLocaleString() }}（整堂總價）</p>
           </div>
@@ -650,7 +652,8 @@
                 coach: r.designatedCoach,
                 venue: r.venuePreference,
                 fee: r.courseType.includes('初階') ? Number(r.studentCount) * 300 : (Number(r.studentCount) <= 2 ? 1400 : 1500),
-                status: r.status
+                status: r.status,
+                resolutionReason: r.resolutionReason || ''
               });
             });
             myBookings.value = combined;
@@ -891,6 +894,7 @@
           case 'Interested': return 'bg-blue-100 text-blue-800';
           case 'Confirmed': return 'bg-emerald-100 text-emerald-800';
           case 'Completed': return 'bg-purple-100 text-purple-800';
+          case 'Returned_Admin': return 'bg-amber-100 text-amber-800';
           case 'Cancelled_User': 
           case 'Cancelled_Admin': return 'bg-slate-100 text-slate-500 line-through';
           default: return 'bg-slate-100 text-slate-600';
@@ -903,6 +907,7 @@
           case 'Interested': return '已有教練接單意向';
           case 'Confirmed': return '媒合成功 (已排課)';
           case 'Completed': return '已結課';
+          case 'Returned_Admin': return '委員會退回重填';
           case 'Cancelled_User': return '學員已自主取消';
           case 'Cancelled_Admin': return '委員會取消';
           default: return status;
