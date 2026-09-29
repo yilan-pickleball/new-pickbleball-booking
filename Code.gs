@@ -118,6 +118,9 @@ function doPost(e) {
       case 'adminCancelBooking':
         result = handleAdminCancelBooking(payload);
         break;
+      case 'resolvePendingRequest':
+        result = handleResolvePendingRequest(payload);
+        break;
       case 'getSubstituteLessons':
         result = handleGetSubstituteLessons(payload);
         break;
@@ -597,6 +600,36 @@ function handleAdminCancelBooking(p) {
     updateRowStatus(ss.getSheetByName('Matches_MAT'), 'matId', p.id, 'Cancelled_Admin');
   }
   return { status: 'success', message: '已執行委員會代客強制取消' };
+}
+
+// 委員會處理填錯的待媒合需求：保留原單與原因，不刪除試算表列。
+function handleResolvePendingRequest(p) {
+  const actor = requireVerifiedAdmin(p);
+  const reqId = String(p.reqId || '').trim();
+  const resolution = String(p.resolution || '');
+  if (!['return', 'cancel'].includes(resolution)) throw new Error('請選擇退回或取消需求。');
+  const reason = lessonNotes(p.reason);
+  if (!reason) throw new Error('請填寫退回或取消原因。');
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const reqSheet = ss.getSheetByName('Requests_REQ');
+  const request = getRowsData(reqSheet).find(r => String(r.reqId) === reqId);
+  if (!request || !['Pending', 'Interested'].includes(request.status)) {
+    throw new Error('需求單已處理或不存在，請重新整理。');
+  }
+  const linked = getRowsData(ss.getSheetByName('Matches_MAT')).some(m => {
+    if (String(m.status || '').startsWith('Cancelled')) return false;
+    let ids = [];
+    try { ids = JSON.parse(m.linkedReqIds || '[]'); } catch (_) {}
+    return String(m.reqId) === reqId || (Array.isArray(ids) && ids.some(id => String(id) === reqId));
+  });
+  if (linked) throw new Error('此需求已關聯正式排程，請到排程頁處理。');
+  updateFields(reqSheet, 'reqId', reqId, {
+    status: resolution === 'return' ? 'Returned_Admin' : 'Cancelled_Admin',
+    resolutionReason: reason,
+    resolvedBy: actor.userId,
+    resolvedAt: new Date().toISOString()
+  });
+  return { status: 'success', message: resolution === 'return' ? '需求已退回，請重新填單。' : '需求已取消。' };
 }
 
 // ==========================================
