@@ -1,5 +1,5 @@
 /**
- * 匹克球預約與媒合系統 - 後端核心 RESTful API (Code.gs v2.5 - 初階個別點名、補課、三個月保留期)
+ * 匹克球預約與媒合系統 - 後端核心 RESTful API (Code.gs v2.6 - 跨堂均分、逐人薪資發放)
  * 負責處理全三端 (學員、教練、委員會) 之 GET 讀取與 POST 寫入交易
  * 整合 LockService 防併發衝堂、自動核發單號與財務核算
  */
@@ -105,6 +105,15 @@ function doPost(e) {
         break;
       case 'updatePayrollStatus':
         result = handleUpdatePayrollStatus(payload);
+        break;
+      case 'createPayrollGroup':
+        result = handleCreatePayrollGroup(payload);
+        break;
+      case 'dissolvePayrollGroup':
+        result = handleDissolvePayrollGroup(payload);
+        break;
+      case 'markPayrollPaid':
+        result = handleMarkPayrollPaid(payload);
         break;
       case 'adminCancelBooking':
         result = handleAdminCancelBooking(payload);
@@ -266,6 +275,7 @@ function handleGetAdminData(adminUid) {
     slots: getRowsData(slotSheet),
     matches: getRowsData(matSheet),
     accounting: getRowsData(accSheet),
+    payroll: buildPayrollPlan(getRowsData(accSheet), getPayrollPayments()),
     coaches: getRowsData(coachSheet).concat(SUBSTITUTE_COACHES),
     admins: admins,
     config: config
@@ -395,19 +405,111 @@ function handleExpressCoachInterest(p) {
 
 
 function handleUpdatePayrollStatus(p) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const accSheet = ss.getSheetByName('Accounting_ACC');
-  const data = accSheet.getDataRange().getValues();
+  // 舊版入口改走同一套逐人發放紀錄，不再讓一位教練的點擊結清整堂課。
+  return handleMarkPayrollPaid(p);
+}
 
-  for (let i = 1; i < data.length; i++) {
-    // 比對記帳單號 accId (第 1 欄，索引 0)
-    if (String(data[i][0]) === String(p.accId)) {
-      // 第 10 欄為 settlementStatus（核銷狀態）
-      accSheet.getRange(i + 1, 10).setValue('Settled');
-      return { status: 'success', message: '該堂薪酬已標記發放結清！' };
-    }
+// 同一均分組的所有課程只算一個酬勞池，按「不重複的教練姓名」均分。
+// 餘數依姓名排序分配 1 元，確保各人金額相加恰好等於酬勞池。
+function payrollCoaches(acc) {
+  return String(acc.coachList || '').split(/[,、]/).map(s => s.trim()).filter(Boolean);
+}
+function payrollKey(groupId, coachName) { return groupId + '|' + coachName; }
+function payrollSheet(create) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName('Payroll_PAY');
+  if (!sheet && create) {
+    sheet = ss.insertSheet('Payroll_PAY');
+    sheet.getRange(1, 1, 1, 7).setValues([['payKey','groupId','coachName','amount','status','paidBy','paidAt']]);
+    sheet.setFrozenRows(1);
   }
-  return { status: 'error', message: '查無該筆記帳單號：' + p.accId };
+  return sheet;
+}
+function getPayrollPayments() { return getRowsData(payrollSheet(false)); }
+function buildPayrollPlan(accounting, payments) {
+  const groups = new Map();
+  accounting.filter(a => a.accId).forEach(acc => {
+    const groupId = String(acc.payrollGroupId || acc.accId);
+    if (!groups.has(groupId)) groups.set(groupId, []);
+    groups.get(groupId).push(acc);
+  });
+  const paid = new Set(payments.filter(p => p.status === 'Settled').map(p => String(p.payKey)));
+  const result = [];
+  groups.forEach((rows, groupId) => {
+    const coaches = [...new Set(rows.flatMap(payrollCoaches))].sort();
+    if (!coaches.length) return;
+    const totalPool = rows.reduce((sum, acc) => sum + Number(acc.netCoachPool || 0), 0);
+    const base = Math.floor(totalPool / coaches.length);
+    const remainder = Math.round(totalPool - base * coaches.length);
+    const legacyPaid = rows.every(acc => acc.settlementStatus === 'Settled' || acc.status === 'Settled');
+    coaches.forEach((coachName, index) => {
+      const key = payrollKey(groupId, coachName);
+      const legacyAmount = rows.length === 1 && legacyPaid ? Number(rows[0].perCoachPay || 0) : null;
+      result.push({ payKey: key, groupId: groupId, isGrouped: !!rows[0].payrollGroupId,
+        coachName: coachName, amount: legacyAmount === null ? base + (index < remainder ? 1 : 0) : legacyAmount,
+        isPaid: legacyPaid || paid.has(key), accIds: rows.map(a => String(a.accId)),
+        lessonDates: rows.map(a => String(a.lessonDate || '')), totalPool: totalPool,
+        coachCount: coaches.length });
+    });
+  });
+  return result;
+}
+function payrollGroupRows(groupId) {
+  return getRowsData(SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Accounting_ACC'))
+    .filter(a => String(a.payrollGroupId || '') === String(groupId));
+}
+function handleCreatePayrollGroup(p) {
+  requireVerifiedAdmin(p);
+  const ids = Array.isArray(p.accIds) ? p.accIds.map(String) : [];
+  if (ids.length < 2 || new Set(ids).size !== ids.length) throw new Error('請至少勾選兩張不同的待發放傳票。');
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Accounting_ACC');
+  const accounting = getRowsData(sheet);
+  const rows = ids.map(id => accounting.find(a => String(a.accId) === id));
+  if (rows.some(a => !a || a.payrollGroupId || a.settlementStatus === 'Settled' || a.status === 'Settled')) {
+    throw new Error('只能將尚未分組、尚未發放的傳票加入均分組。');
+  }
+  const payments = getPayrollPayments();
+  if (rows.some(a => payments.some(pay => pay.groupId === a.accId && pay.status === 'Settled'))) {
+    throw new Error('部分傳票已有教練領款，不能重新分組。');
+  }
+  const coaches = [...new Set(rows.flatMap(payrollCoaches))];
+  if (coaches.length < 2) throw new Error('均分組須包含至少兩位不同教練。');
+  const totalPool = rows.reduce((sum, a) => sum + Number(a.netCoachPool || 0), 0);
+  if (!Number.isInteger(totalPool) || totalPool < 0) throw new Error('酬勞金額須為非負整數，請先核對傳票。');
+  const groupId = 'PAYG-' + Utilities.getUuid();
+  rows.forEach(a => updateFields(sheet, 'accId', a.accId, { payrollGroupId: groupId }));
+  return { status: 'success', groupId: groupId, totalPool: totalPool, coachCount: coaches.length };
+}
+function handleDissolvePayrollGroup(p) {
+  requireVerifiedAdmin(p);
+  const groupId = String(p.groupId || '');
+  const rows = groupId.startsWith('PAYG-') ? payrollGroupRows(groupId) : [];
+  if (!rows.length || rows.some(a => a.settlementStatus === 'Settled')) throw new Error('找不到可拆除的均分組。');
+  if (getPayrollPayments().some(pay => pay.groupId === groupId && pay.status === 'Settled')) {
+    throw new Error('已有教練領款，不能拆除均分組。');
+  }
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Accounting_ACC');
+  rows.forEach(a => updateFields(sheet, 'accId', a.accId, { payrollGroupId: '' }));
+  return { status: 'success', message: '已拆除均分組，課程恢復逐堂計算。' };
+}
+function handleMarkPayrollPaid(p) {
+  const actor = requireVerifiedAdmin(p);
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Accounting_ACC');
+  const accounting = getRowsData(sheet);
+  const payments = getPayrollPayments();
+  const plan = buildPayrollPlan(accounting, payments);
+  const key = String(p.payKey || (p.accId && p.coachName ? payrollKey(p.accId, p.coachName) : ''));
+  const item = plan.find(entry => entry.payKey === key);
+  if (!item) throw new Error('找不到此教練的應發薪資，請重新整理。');
+  if (item.isPaid) throw new Error('此筆薪資已標記發放。');
+  appendFields(payrollSheet(true), { payKey: item.payKey, groupId: item.groupId,
+    coachName: item.coachName, amount: item.amount, status: 'Settled',
+    paidBy: actor.userId, paidAt: new Date().toISOString() });
+  const updated = buildPayrollPlan(accounting, getPayrollPayments());
+  if (updated.filter(entry => entry.groupId === item.groupId).every(entry => entry.isPaid)) {
+    item.accIds.forEach(id => updateFields(sheet, 'accId', id, { settlementStatus: 'Settled' }));
+  }
+  return { status: 'success', message: item.coachName + '的 NT$ ' + item.amount + ' 已標記發放。' };
 }
 
 
@@ -834,6 +936,7 @@ function handleSettleLessonAccounting(p) {
   const actor = isSubstituteLesson(match) ? requireVerifiedAdmin(p) : null;
   const actualRevenue = moneyValue(p.actualRevenue, '實收學費');
   const venueCost = moneyValue(p.venueCost === undefined || p.venueCost === null || p.venueCost === '' ? 400 : p.venueCost, '場地費');
+  if (!Number.isInteger(actualRevenue) || !Number.isInteger(venueCost)) throw new Error('學費與場地費請填寫整數元。');
   const substituteName = isSubstituteLesson(match) ? requiredSubstituteName(match.substituteCoachName) : '';
   const coachList = substituteName || match.coachNames;
   const coachCount = String(coachList || '').split(/[,、]/).filter(s => s.trim()).length;
