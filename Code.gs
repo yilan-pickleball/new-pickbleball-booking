@@ -103,6 +103,9 @@ function doPost(e) {
       case 'settleLessonAccounting':
         result = handleSettleLessonAccounting(payload);
         break;
+      case 'updateAccountingCoaches':
+        result = handleUpdateAccountingCoaches(payload);
+        break;
       case 'updatePayrollStatus':
         result = handleUpdatePayrollStatus(payload);
         break;
@@ -468,8 +471,8 @@ function handleCreatePayrollGroup(p) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Accounting_ACC');
   const accounting = getRowsData(sheet);
   const rows = ids.map(id => accounting.find(a => String(a.accId) === id));
-  if (rows.some(a => !a || a.payrollGroupId || a.settlementStatus === 'Settled' || a.status === 'Settled')) {
-    throw new Error('只能將尚未分組、尚未發放的傳票加入均分組。');
+  if (rows.some(a => !a || a.payrollGroupId || a.settlementStatus === 'Settled' || a.status === 'Settled' || a.payrollParticipation === 'ExpenseOnly')) {
+    throw new Error('只能將尚未分組、尚未發放的授課傳票加入均分組；未授課場地費須個別結算。');
   }
   const payments = getPayrollPayments();
   if (rows.some(a => payments.some(pay => pay.groupId === a.accId && pay.status === 'Settled'))) {
@@ -478,7 +481,7 @@ function handleCreatePayrollGroup(p) {
   const coaches = [...new Set(rows.flatMap(payrollCoaches))];
   if (coaches.length < 2) throw new Error('均分組須包含至少兩位不同教練。');
   const totalPool = rows.reduce((sum, a) => sum + Number(a.netCoachPool || 0), 0);
-  if (!Number.isInteger(totalPool) || totalPool < 0) throw new Error('酬勞金額須為非負整數，請先核對傳票。');
+  if (!Number.isInteger(totalPool)) throw new Error('酬勞淨額須為整數元，請先核對傳票。');
   const groupId = 'PAYG-' + Utilities.getUuid();
   rows.forEach(a => updateFields(sheet, 'accId', a.accId, { payrollGroupId: groupId }));
   return { status: 'success', groupId: groupId, totalPool: totalPool, coachCount: coaches.length };
@@ -503,8 +506,8 @@ function handleMarkPayrollPaid(p) {
   const plan = buildPayrollPlan(accounting, payments);
   const key = String(p.payKey || (p.accId && p.coachName ? payrollKey(p.accId, p.coachName) : ''));
   const item = plan.find(entry => entry.payKey === key);
-  if (!item) throw new Error('找不到此教練的應發薪資，請重新整理。');
-  if (item.isPaid) throw new Error('此筆薪資已標記發放。');
+  if (!item) throw new Error('找不到此教練的待結算紀錄，請重新整理。');
+  if (item.isPaid) throw new Error('此筆淨額已結算。');
   appendFields(payrollSheet(true), { payKey: item.payKey, groupId: item.groupId,
     coachName: item.coachName, amount: item.amount, status: 'Settled',
     paidBy: actor.userId, paidAt: new Date().toISOString() });
@@ -512,7 +515,9 @@ function handleMarkPayrollPaid(p) {
   if (updated.filter(entry => entry.groupId === item.groupId).every(entry => entry.isPaid)) {
     item.accIds.forEach(id => updateFields(sheet, 'accId', id, { settlementStatus: 'Settled' }));
   }
-  return { status: 'success', message: item.coachName + '的 NT$ ' + item.amount + ' 已標記發放。' };
+  return { status: 'success', message: item.coachName + (item.amount < 0
+    ? '的場地費差額 NT$ ' + Math.abs(item.amount) + ' 已標記扣抵。'
+    : '的 NT$ ' + item.amount + ' 已標記發放。') };
 }
 
 
@@ -947,40 +952,86 @@ function handleCoachCompleteLesson(p) {
     if (!assigned && actor.userId !== config.INITIAL_SUPER_ADMIN && !admins.some(a => a.adminUid === actor.userId && a.status === 'Approved')) throw new Error('無此課程簽到權限。');
   }
   if (isSubstituteLesson(match)) requiredSubstituteName(match.substituteCoachName);
+  const revenue = moneyValue(p.reportedRevenue === undefined ? p.actualRevenue : p.reportedRevenue, '回報實收');
+  const completionNotes = lessonNotes(p.notes);
+  let attendanceSummary = lessonNotes(p.attendance || '全員到課');
   if (basicLesson(match)) {
     const roster=confirmedRoster(match);
+    if (Array.isArray(p.attendanceEntries)) handleSaveBasicAttendance(Object.assign({}, p, {entries:p.attendanceEntries}));
     const marked=getRowsData(learningSheet('Basic_Attendance')).filter(x=>x.matId===match.matId);
     if (!roster.length || roster.some(member=>!marked.some(x=>x.memberId===member.id))) throw new Error('請先完成全班逐人點名。');
+    const presentCount = roster.filter(member => marked.some(x => x.memberId === member.id && x.status === 'Present')).length;
+    attendanceSummary = presentCount === roster.length ? '全員到課' : presentCount === 0 ? '未到課/其他' : '部分到課';
   }
-  const revenue = moneyValue(p.reportedRevenue === undefined ? p.actualRevenue : p.reportedRevenue, '回報實收');
   updateFields(sheet, 'matId', match.matId, {
-    reportedRevenue: revenue, attendance: lessonNotes(p.attendance || '全員到課'), completionNotes: lessonNotes(p.notes),
+    reportedRevenue: revenue, attendance: attendanceSummary, completionNotes: completionNotes,
     completedBy: actor.userId, completedByName: actor.displayName || '', completedAt: new Date().toISOString(), status: 'Completed'
   });
   return { status: 'success', message: '已完成簽到，等待委員會核對實收與核銷。' };
 }
 
+function accountingCoachSelection(p, match, revenue) {
+  const noTeaching = p.noTeaching === true;
+  if (noTeaching && revenue !== 0) throw new Error('未授課、僅場地費的實收學費須為 0 元。');
+  const scheduled = String(match.substituteCoachName || match.coachNames || '');
+  const explicit = Array.isArray(p.settlementCoaches);
+  const chosen = explicit ? p.settlementCoaches : scheduled.split(/[,、]/);
+  if (!chosen.length || chosen.length > 20) throw new Error('請至少選擇一位實際授課或場地費負擔教練。');
+  const approved = getRowsData(SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Coaches')).filter(c => c.status === 'Approved');
+  const normalize = name => String(name || '').replace(/\s*教練\s*/g, '').trim();
+  const names = chosen.map(value => {
+    const name = requiredSubstituteName(value);
+    const official = approved.find(c => [c.realName,c.displayName].some(n => n && normalize(n) === normalize(name)));
+    const canonical = official && (official.realName || official.displayName);
+    return canonical ? (canonical.includes('教練') ? canonical : canonical + ' 教練') : name;
+  });
+  if (new Set(names.map(normalize)).size !== names.length) throw new Error('教練名單不可重複。');
+  if (!explicit && Number(p.coachCount) !== names.length) throw new Error('出勤人數與課程教練名單不一致，請先核對名單。');
+  return {coachList:names.join('、'), coachCount:noTeaching ? 0 : names.length, allocationCount:names.length,
+    actualCoachList:noTeaching ? '' : names.join('、'), payrollParticipation:noTeaching ? 'ExpenseOnly' : 'Teaching',
+    scheduledCoachList:scheduled};
+}
+function handleUpdateAccountingCoaches(p) {
+  const actor = requireVerifiedAdmin(p);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Accounting_ACC');
+  const acc = getRowsData(sheet).find(a => String(a.accId) === String(p.accId));
+  if (!acc || acc.payrollGroupId || acc.settlementStatus === 'Settled' || acc.status === 'Settled' ||
+      getPayrollPayments().some(pay => String(pay.groupId) === String(acc.accId) && pay.status === 'Settled')) {
+    throw new Error('只能更正未分組、未發放的傳票；已分組請先拆除均分組。');
+  }
+  const reason = lessonNotes(p.reason);
+  if (!reason) throw new Error('請填寫更正原因。');
+  if (!Array.isArray(p.settlementCoaches)) throw new Error('請選擇結算教練。');
+  const match = getRowsData(ss.getSheetByName('Matches_MAT')).find(m => m.matId === acc.matId) || {coachNames:acc.scheduledCoachList || acc.coachList};
+  const selection = accountingCoachSelection(p, match, Number(acc.actualRevenue));
+  const perCoachPay = Math.round(Number(acc.netCoachPool) / selection.allocationCount);
+  delete selection.allocationCount;
+  updateFields(sheet,'accId',acc.accId,Object.assign(selection,{perCoachPay:perCoachPay,
+    coachSelectionReason:reason,coachSelectionUpdatedBy:actor.userId,coachSelectionUpdatedAt:new Date().toISOString()}));
+  return {status:'success',message:'傳票教練名單已更正。'};
+}
 function handleSettleLessonAccounting(p) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const matSheet = ss.getSheetByName('Matches_MAT');
   const match = getRowsData(matSheet).find(m => m.matId === p.matId);
   const accSheet = ss.getSheetByName('Accounting_ACC');
   if (!match || match.status !== 'Completed' || getRowsData(accSheet).some(a => a.matId === p.matId)) throw new Error('課程尚未完課或已核銷，請重新整理。');
-  const actor = isSubstituteLesson(match) ? requireVerifiedAdmin(p) : null;
+  const actor = requireVerifiedAdmin(p);
   const actualRevenue = moneyValue(p.actualRevenue, '實收學費');
   const venueCost = moneyValue(p.venueCost === undefined || p.venueCost === null || p.venueCost === '' ? 400 : p.venueCost, '場地費');
   if (!Number.isInteger(actualRevenue) || !Number.isInteger(venueCost)) throw new Error('學費與場地費請填寫整數元。');
   const substituteName = isSubstituteLesson(match) ? requiredSubstituteName(match.substituteCoachName) : '';
-  const coachList = substituteName || match.coachNames;
-  const coachCount = String(coachList || '').split(/[,、]/).filter(s => s.trim()).length;
-  if (!coachCount || Number(p.coachCount) !== coachCount) throw new Error('出勤人數與課程教練名單不一致，請先核對名單。');
-  const netCoachPool = Math.max(0, actualRevenue - venueCost);
-  const perCoachPay = Math.round(netCoachPool / coachCount);
+  const selection = accountingCoachSelection(p, match, actualRevenue);
+  const coachList = selection.coachList, coachCount = selection.coachCount;
+  const netCoachPool = actualRevenue - venueCost;
+  const perCoachPay = Math.round(netCoachPool / selection.allocationCount);
   const accId = generateSequenceId('ACC');
   appendFields(accSheet, {
     accId: accId, matId: match.matId, lessonDate: match.lessonDate, actualRevenue: actualRevenue,
     venueCost: venueCost, netCoachPool: netCoachPool, coachCount: coachCount, perCoachPay: perCoachPay,
     coachList: coachList, settlementStatus: 'Unsettled', settledBy: actor ? actor.userId : p.settledBy,
+    actualCoachList:selection.actualCoachList,scheduledCoachList:selection.scheduledCoachList,payrollParticipation:selection.payrollParticipation,
     substituteSlot: substituteName ? match.coachNames : '', substituteCoachName: substituteName,
     notes: match.notes || '', reportedRevenue: match.reportedRevenue === undefined ? '' : match.reportedRevenue,
     attendance: match.attendance || '', completionNotes: match.completionNotes || '', completedBy: match.completedBy || ''
@@ -1174,3 +1225,7 @@ function setupBasicAttendanceRetention() {
     ScriptApp.newTrigger('purgeOldBasicAttendance').timeBased().everyDays(1).atHour(3).inTimezone('Asia/Taipei').create();
   return '已設定每日清理三個月前的點名紀錄';
 }
+Gemini
+Gemini 的回覆
+雲端硬碟內建的 Gemini 不支援 文字 檔案
+Gemini 版 Workspace 可能會出錯。 瞭解詳情
