@@ -1225,7 +1225,3 @@ function setupBasicAttendanceRetention() {
     ScriptApp.newTrigger('purgeOldBasicAttendance').timeBased().everyDays(1).atHour(3).inTimezone('Asia/Taipei').create();
   return '已設定每日清理三個月前的點名紀錄';
 }
-Gemini
-Gemini 的回覆
-雲端硬碟內建的 Gemini 不支援 文字 檔案
-Gemini 版 Workspace 可能會出錯。 瞭解詳情
