@@ -45,7 +45,7 @@
           <div class="flex items-center space-x-1.5">
             <span class="font-bold text-sm tracking-wide">{{ adminProfile.name }}</span>
             <span :class="isAdminApproved ? 'bg-purple-600' : 'bg-amber-600'" class="text-[10px] px-1.5 py-0.5 rounded font-medium">
-              {{ isAdminApproved ? '委員會幹部' : '審核中/無權限' }}
+              {{ authState === 'loading' ? '驗證中' : authState === 'error' ? '連線異常' : isAdminApproved ? '委員會幹部' : '審核中/無權限' }}
             </span>
           </div>
           <p class="text-[10px] text-slate-400 font-mono">UID: {{ formatUid(adminProfile.userId) }}</p>
@@ -65,7 +65,8 @@
 
   <!-- 門禁阻擋 -->
   <p v-if="proxySubmitMessage" role="status" class="mx-4 my-2 rounded-lg bg-emerald-50 text-emerald-800 p-3 text-sm">{{ proxySubmitMessage }}</p>
-  <main v-if="!isAdminApproved" class="flex-1 p-6 flex flex-col justify-center">
+  <main v-if="authState === 'loading' || authState === 'error'" class="p-6 text-center space-y-4"><h2 class="font-bold">{{ authState === 'loading' ? '正在驗證 LINE 身分與管理權限…' : '暫時無法完成登入' }}</h2><p>{{ authError }}</p><button v-if="authState === 'error'" @click="initializeAdmin" class="border rounded-lg p-3">重試登入</button></main>
+  <main v-else-if="!isAdminApproved" class="flex-1 p-6 flex flex-col justify-center">
     <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm text-center space-y-4">
       <div class="w-14 h-14 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto text-2xl font-bold">
         🚫
@@ -144,6 +145,7 @@
         </span>
       </div>
 
+      <div class="flex flex-wrap gap-2 items-center text-sm"><label>批次日期 <input type="date" v-model="batchDate" class="border p-2 rounded"></label><button @click="selectBatchRequests" :disabled="isProcessing" class="border p-2 rounded">選取此日期前 10 筆</button><button @click="openBatchMatching" :disabled="isProcessing || !selectedRequestIds.length" class="bg-purple-700 text-white p-2 rounded">批次排課（{{selectedRequestIds.length}}）</button></div>
       <div v-if="pendingRequests.length === 0" class="py-16 text-center text-slate-400 text-xs">
         目前無待處理的媒合需求
       </div>
@@ -156,7 +158,7 @@
         >
           <div class="flex justify-between items-start">
             <div>
-              <span class="font-mono text-xs font-bold text-blue-700">{{ req.reqId }}</span>
+              <label class="block"><input type="checkbox" v-model="selectedRequestIds" :value="req.reqId" :disabled="isProcessing"> 加入批次排課</label><span class="font-mono text-xs font-bold text-blue-700">{{ req.reqId }}</span>
               <h3 class="text-sm font-bold text-slate-900 mt-0.5">{{ req.studentName }} ({{ req.courseType }})</h3>
             </div>
             <span class="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
@@ -341,6 +343,7 @@
         每人 5 堂共 NT$1,500（每人每堂 NT$300）。{{ proxyForm.studentCount }} 人班每堂合計 NT$ {{ (Number(proxyForm.studentCount || 0) * 300).toLocaleString() }}，5 堂合計 NT$ {{ (Number(proxyForm.studentCount || 0) * 1500).toLocaleString() }}。
       </p>
 
+      <div class="flex flex-wrap gap-2 text-sm"><button @click="openBatchCompletion" :disabled="isProcessing || !selectedMatchIds.length" class="bg-emerald-700 text-white p-3 rounded-lg">批次完課（{{selectedMatchIds.length}}）</button><span>勾選下方課程，每次最多 10 堂。</span></div>
       <!-- 正式排程總覽：依台北日期分類，保留原始資料供衝堂與記帳使用 -->
       <div class="space-y-5 pt-2">
         <div v-for="group in scheduleGroups" :key="group.key" class="space-y-3">
@@ -349,7 +352,7 @@
           <p v-if="!group.matches.length" class="p-3 text-xs text-slate-400 bg-slate-50 rounded-xl">{{ group.emptyText }}</p>
         <div v-for="m in group.matches" :key="m.matId" class="p-3 bg-white border border-slate-200 rounded-xl space-y-2 text-xs">
           <div class="flex justify-between items-center">
-            <span class="font-mono font-bold text-purple-700">{{ m.matId }}</span>
+            <label><input type="checkbox" v-model="selectedMatchIds" :value="m.matId" :disabled="isProcessing"> 批次完課　<span class="font-mono font-bold text-purple-700">{{ m.matId }}</span></label>
             <span 
               :class="{
                 'bg-amber-100 text-amber-800': m.status === 'Confirmed',
@@ -789,6 +792,17 @@
 <div class="flex gap-2"><input v-model="accountingCoachEditor.newCoachName" maxlength="80" class="min-w-0 flex-1 border rounded-lg p-2" placeholder="臨時授課教練姓名"><button type="button" @click="addAccountingCoach(accountingCoachEditor)" class="shrink-0 p-2 bg-slate-100 rounded-lg">加入</button></div>
 <label class="block">更正原因<input v-model="accountingCoachEditor.reason" maxlength="1000" class="w-full border rounded-lg p-2" placeholder="例如臨時換班、原教練未授課"></label>
 <button @click="saveAccountingCoaches" :disabled="isProcessing" class="w-full bg-purple-700 text-white rounded-lg p-3">儲存更正</button><button @click="accountingCoachEditor.show=false" :disabled="isProcessing" class="w-full p-2">取消</button></div></div>
+  <div v-if="batchEditor.show" class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-3"><div class="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-4 space-y-4">
+<h2 class="text-lg font-bold">{{batchEditor.kind==='match'?'確認批次排課':'確認批次完課'}}</h2><p class="text-sm">逐筆確認後一次送出；成功項目會移除，失敗項目保留並顯示原因。每批最多 10 筆。</p>
+<p role="status" class="text-sm whitespace-pre-wrap">{{batchEditor.message}}</p>
+<div v-for="row in batchEditor.rows" :key="row.id" class="border rounded-lg p-3 space-y-2 text-sm"><strong>{{row.id}} · {{row.title}}</strong><p>{{row.date}} {{row.time}} · {{row.coach}}</p><p v-if="row.error" class="text-red-700">{{row.error}}</p>
+<template v-if="batchEditor.kind==='match'"><p>球場：{{row.payload.venue}} · {{row.payload.studentCount}} 人</p><p>依需求卡片已選的教練及球場排課。需要合班的需求請使用單筆合班功能。</p></template>
+<template v-else><label class="block">本堂實收學費<input type="number" min="0" v-model.number="row.revenue" class="border rounded p-2 w-full"></label>
+<div v-if="row.basic" class="space-y-2"><button @click="row.members.forEach(p=>p.status='Present')" :disabled="isProcessing" class="border rounded p-2">本堂全員到課</button><label v-for="person in row.members" :key="person.id" class="flex flex-wrap gap-2 items-center"><span>{{person.name}}</span><select v-model="person.status" class="border rounded p-2"><option value="">尚未點名</option><option value="Present">到課</option><option value="Excused">請假</option><option value="Absent">缺席</option></select><input v-model="person.notes" maxlength="1000" placeholder="點名備註" class="border rounded p-2 min-w-0"></label></div>
+<label v-else>出席情形<select v-model="row.attendance" class="border p-2"><option>全員到課</option><option>部分到課</option><option>未到課/其他</option></select></label>
+<textarea v-model="row.notes" maxlength="1000" placeholder="完課備註" class="w-full border rounded p-2"></textarea></template>
+<button @click="batchEditor.rows=batchEditor.rows.filter(x=>x.id!==row.id)" :disabled="isProcessing" class="underline">移除此筆</button></div>
+<button @click="submitBatch" :disabled="isProcessing || !batchEditor.rows.length" class="w-full rounded-lg bg-purple-700 text-white p-3">{{isProcessing?'整批處理中，請勿重複送出…':'確認並送出整批'}}</button><button @click="batchEditor.show=false" :disabled="isProcessing" class="w-full border rounded-lg p-3">關閉</button></div></div>
   <div v-if="completionForm.show" class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
     <div role="dialog" aria-modal="true" aria-label="授課簽到" class="bg-white rounded-xl p-5 w-full max-w-sm space-y-3 text-xs max-h-[90vh] overflow-y-auto">
       <h2 class="font-bold text-base">授課簽到與實收回報</h2>
@@ -888,11 +902,13 @@
   createApp({
     setup() {
       const adminProfile = reactive({
-        userId: 'Ud471b1a7217b649b3599b54700d352c9',
-        name: '杜和益'
+        userId: '',
+        name: '登入中'
       });
 
       const isAdminApproved = ref(false);
+      const authState = ref('loading');
+      const authError = ref('');
       const currentTab = ref('matching');
       const accountingSubView = ref('slip');
       const isProcessing = ref(false);
@@ -1014,6 +1030,77 @@
         } else if (startIndex + 1 < TIME_OPTIONS.length) {
           proxyForm.endTime = TIME_OPTIONS[startIndex + 1];
         }
+      }
+
+
+      const selectedRequestIds=ref([]), selectedMatchIds=ref([]), batchDate=ref('');
+      const batchEditor=reactive({show:false,kind:'match',rows:[],message:''});
+      function selectBatchRequests(){ selectedRequestIds.value=pendingRequests.value.filter(r=>!batchDate.value||r.preferredDate===batchDate.value).slice(0,10).map(r=>r.reqId); }
+      function openBatchMatching(){
+        if(isProcessing.value)return;
+        const rows=pendingRequests.value.filter(r=>selectedRequestIds.value.includes(r.reqId));
+        if(!rows.length||rows.length>10){alert('每批請選擇 1～10 筆。');return;}
+        try {
+          batchEditor.rows=rows.map(r=>{
+            if(!r.assignedCoachUid)throw Error(r.reqId+' 請先指定教練。');
+            if(String(r.courseType||'').includes('初階') && Number(r.studentCount)<4)throw Error(r.reqId+' 需先使用單筆合班功能，湊足 4～6 人。');
+            if(isSubstituteChoice(r.assignedCoachUid)&&!String(r.substituteCoachName||'').trim())throw Error(r.reqId+' 請填代課教練姓名。');
+            return {id:r.reqId,title:r.studentName,date:r.preferredDate,time:r.timeSlot,coach:coachNameByUid(r.assignedCoachUid),payload:{reqId:r.reqId,lessonDate:r.preferredDate,lessonTime:r.timeSlot,venue:r.assignedVenue,studentUid:r.studentUid,studentName:r.studentName,coachUid:r.assignedCoachUid,coachNames:coachNameByUid(r.assignedCoachUid),courseType:r.courseType,studentCount:r.studentCount,expectedFee:expectedFeeForRequest(r),linkedReqIds:[],substituteCoachName:r.substituteCoachName||'',notes:r.notes||''}};
+          });
+          Object.assign(batchEditor,{show:true,kind:'match',message:''});
+        }catch(e){alert(e.message);}
+      }
+      async function openBatchCompletion(){
+        if(isProcessing.value)return;
+        const rows=allMatches.value.filter(m=>m.status==='Confirmed'&&selectedMatchIds.value.includes(m.matId));
+        if(!rows.length||rows.length>10){alert('每批請選擇 1～10 堂。');return;}
+        isProcessing.value=true;
+        try {
+          if(rows.some(m=>String(m.courseType||'').includes('初階')) && !await loadLearning())return;
+          batchEditor.rows=rows.map(m=>{
+            if(isSubstituteChoice(m.coachUid||m.coachNames)&&!canDelegateCheckin.value)throw Error('您沒有 '+m.matId+' 的代課簽到權限。');
+            const basic=String(m.courseType||'').includes('初階'); const detail=learning.matches.find(x=>x.matId===m.matId);
+            if(basic&&(!detail?.roster?.length||String(detail.rosterNeedsReview).toLowerCase()==='true'))throw Error(m.matId+' 請先確認學員名冊。');
+            const members=basic?detail.roster.map(p=>{const mark=learning.attendance.find(a=>a.matId===m.matId&&a.memberId===p.id);return {...p,status:mark?.status||'',notes:mark?.notes||''};}):[];
+            return {id:m.matId,title:m.studentName,date:m.lessonDate,time:m.lessonTime,coach:m.substituteCoachName||m.coachNames,basic,members,revenue:expectedFeeForMatch(m),attendance:'全員到課',notes:''};
+          });
+          Object.assign(batchEditor,{show:true,kind:'complete',message:''});
+        }catch(e){alert(e.message);}finally{isProcessing.value=false;}
+      }
+      async function submitBatch(){
+        if(isProcessing.value||!batchEditor.rows.length)return;
+        const kind=batchEditor.kind;
+        let items;
+        try{items=batchEditor.rows.map(r=>{
+          if(kind==='match')return r.payload;
+          if(r.revenue===''||!Number.isFinite(Number(r.revenue))||Number(r.revenue)<0)throw Error(r.id+' 請填正確實收學費。');
+          if(r.basic&&r.members.some(p=>!p.status))throw Error(r.id+' 尚未完成逐人點名。');
+          return {matId:r.id,reportedRevenue:Number(r.revenue),attendance:r.attendance,notes:r.notes,attendanceEntries:r.basic?r.members.map(p=>({memberId:p.id,status:p.status,notes:p.notes})):undefined};
+        });}catch(e){batchEditor.message=e.message;return;}
+        isProcessing.value=true;
+        try{
+          const data=await payrollPost({action:kind==='match'?'batchConfirmMatches':'batchCompleteLessons',items});
+          if(!Array.isArray(data.results))throw Error('請先部署新版 GAS。');
+          const done=new Set();
+          data.results.forEach(result=>{
+            const row=batchEditor.rows.find(r=>r.id===result.id);
+            if(result.status==='success'){
+              done.add(result.id);
+              if(kind==='match'){
+                rawRequests.value.forEach(r=>{if(r.reqId===result.id)r.status='Confirmed';});
+                if(result.match&&!allMatches.value.some(m=>m.matId===result.match.matId))allMatches.value.push(result.match);
+              }else{
+                const m=allMatches.value.find(m=>m.matId===result.id);if(m)Object.assign(m,result.changes);
+                if(row?.basic)row.members.forEach(p=>{const mark=learning.attendance.find(a=>a.matId===row.id&&a.memberId===p.id);if(mark)mark.status=p.status;});
+              }
+            }else if(row)row.error=result.message;
+          });
+          batchEditor.rows=batchEditor.rows.filter(r=>!done.has(r.id));
+          selectedRequestIds.value=selectedRequestIds.value.filter(id=>!done.has(id));selectedMatchIds.value=selectedMatchIds.value.filter(id=>!done.has(id));
+          batchEditor.message='成功 '+done.size+' 筆；剩餘 '+batchEditor.rows.length+' 筆。'+(batchEditor.rows.length?'請依錯誤提示修正；排課指派需關閉視窗回卡片修改後再開啟。':'已更新畫面。');
+          if(kind==='complete' && items.some(i=>i.attendanceEntries))await loadLearning();
+        }catch(e){batchEditor.message=e.message+' 若連線中斷，部分資料可能已儲存，請先重新整理核對單號，再選取未完成項目。';}
+        finally{isProcessing.value=false;}
       }
 
       const selectedMatId = ref('');
@@ -1239,6 +1326,7 @@
       }
 
       async function loadAdminData() {
+        if (!adminProfile.userId) { authState.value='error'; authError.value='請先完成 LINE 登入。'; return; }
         // 保留尚未送出的人工改派草稿，避免按重新整理後又跳回原指定教練。
         const draftAssignments = new Map(
           rawRequests.value.map(r => [String(r.reqId || ''), {
@@ -1252,7 +1340,7 @@
           const res = await fetch(`${GAS_API_URL}?action=getAdminData&uid=${adminProfile.userId}`);
           const data = await res.json();
           if (data.status === 'success') {
-            isAdminApproved.value = true;
+            isAdminApproved.value = true; authState.value='ready'; authError.value='';
 
             // 先載入教練名單，後續才能把指定教練姓名正確解析成 UID。
             rawCoaches.value = data.coaches || [];
@@ -1283,10 +1371,11 @@
             rawPayroll.value = data.payroll || [];
             selectedPayrollAccIds.value = selectedPayrollAccIds.value.filter(id => ungroupedPayrollAccs.value.some(a => String(a.accId) === id));
           } else if (data.status === 'unauthorized') {
-            isAdminApproved.value = false;
-          }
+            isAdminApproved.value = false; authState.value='denied';
+          } else { throw new Error(data.message || '讀取管理資料失敗'); }
         } catch (err) {
           console.error('後台資料同步失敗:', err);
+          authState.value='error'; authError.value='連線失敗，請重試；這不代表您的權限未通過。';
         }
       }
 
@@ -1778,29 +1867,25 @@
         });
       }
 
-      onMounted(async () => {
-        if (ADMIN_LIFF_ID && typeof liff !== 'undefined') {
-          try {
-            await liff.init({ liffId: ADMIN_LIFF_ID });
-            if (!liff.isLoggedIn()) {
-              liff.login();
-              return;
-            }
-            const profile = await liff.getProfile();
-            adminProfile.userId = profile.userId;
-            adminProfile.name = profile.displayName + ' (幹部)';
-          } catch (e) {
-            console.warn('委員會 LIFF 初始化失敗，採用預設身分:', e);
-          }
-        }
-        await loadAdminData();
-        if(isAdminApproved.value) await loadLearning();
-      });
+      async function initializeAdmin() {
+        authState.value='loading'; authError.value=''; isAdminApproved.value=false;
+        try {
+          if (!ADMIN_LIFF_ID || typeof liff === 'undefined') throw Error('無法載入 LINE 登入，請重新開啟頁面。');
+          await liff.init({liffId:ADMIN_LIFF_ID});
+          if (!liff.isLoggedIn()) { liff.login(); return; }
+          const profile=await liff.getProfile();
+          adminProfile.userId=profile.userId; adminProfile.name=profile.displayName+' (幹部)';
+          await loadAdminData();
+          if(isAdminApproved.value) await loadLearning();
+        } catch(e) { authState.value='error'; authError.value=e.message || '登入失敗，請重試。'; }
+      }
+      onMounted(initializeAdmin);
 
       return {
         adminProfile, calendarMode,calendarAnchor,calendarTitle,calendarDays,calendarCoach,calendarTypes,shiftCalendar,eventsForDay,learning,loadLearning,attendanceFor,attendanceSummary,rosterEditor,editRoster,saveRoster,attendanceEditor,editAttendance,saveAdminAttendance,reviewMakeup,requestMakeupAdmin,deleteAttendanceAdmin,
         isSubstituteChoice, canDelegateCheckin, substituteEditor, openSubstituteEditor, saveSubstitute,
         completionForm, submitAdminCompletion, markCompletionAllPresent,
+        authState, authError, initializeAdmin, selectedRequestIds, selectedMatchIds, batchDate, batchEditor, selectBatchRequests, openBatchMatching, openBatchCompletion, submitBatch,
         isAdminApproved,
         currentTab,
         accountingSubView,
