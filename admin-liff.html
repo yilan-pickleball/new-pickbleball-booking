@@ -64,6 +64,7 @@
   </header>
 
   <!-- 門禁阻擋 -->
+  <p v-if="proxySubmitMessage" role="status" class="mx-4 my-2 rounded-lg bg-emerald-50 text-emerald-800 p-3 text-sm">{{ proxySubmitMessage }}</p>
   <main v-if="!isAdminApproved" class="flex-1 p-6 flex flex-col justify-center">
     <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm text-center space-y-4">
       <div class="w-14 h-14 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto text-2xl font-bold">
@@ -332,7 +333,7 @@
           class="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition flex items-center justify-center space-x-1"
         >
           <span v-if="isProcessing" class="animate-spin mr-1">🔄</span>
-          <span>建立代客預約需求 (寫入 REQ-)</span>
+          <span>{{ isProcessing ? '需求送出中，請勿重複提交…' : '建立代客預約需求 (寫入 REQ-)' }}</span>
         </button>
       </div>
 
@@ -1376,7 +1377,10 @@
         }
       }
 
+      const proxySubmitMessage = ref('');
       async function submitProxyBooking() {
+        if (isProcessing.value) return;
+        proxySubmitMessage.value = '';
         if (String(proxyForm.courseType || '').includes('初階')) {
           const count = Number(proxyForm.studentCount);
           if (!Number.isInteger(count) || count < 1 || count > 6 || proxyForm.participants.length !== count) {
@@ -1425,13 +1429,21 @@
           });
           const result = await res.json();
           if (result.status === 'success') {
-            alert(`代客需求單建立成功！單號：${result.reqId}`);
+            proxySubmitMessage.value = `代客需求單已儲存，單號：${result.reqId}`;
+            if (result.request && result.request.reqId === result.reqId) {
+              const r = result.request;
+              const row = { ...r, assignedCoachUid: r.designatedCoachUid || findCoachUidByName(r.designatedCoach) || '', assignedVenue: r.venuePreference || '宜蘭國民運動中心' };
+              const index = rawRequests.value.findIndex(item => item.reqId === r.reqId);
+              if (index < 0) rawRequests.value.push(row); else rawRequests.value.splice(index, 1, row);
+            } else {
+              // 相容尚未更新 GAS 的部署；新版回傳新單即可省略整頁重載。
+              await loadAdminData();
+            }
             proxyForm.studentName = '';
             proxyForm.participants.forEach(person => { person.name = ''; });
             proxyForm.substituteCoachName = '';
             proxyForm.notes = '';
             currentTab.value = 'matching';
-            await loadAdminData();
           } else {
             alert('建立失敗：' + result.message);
           }
@@ -1834,7 +1846,7 @@
         loadAdminData,
         confirmMatch,
         openRequestResolution, submitRequestResolution,
-        submitProxyBooking,
+        submitProxyBooking, proxySubmitMessage,
         markCompletedAdmin,
         forceCancel,
         approveCoach,
@@ -1852,4 +1864,3 @@
 
 </body>
 </html>
-
