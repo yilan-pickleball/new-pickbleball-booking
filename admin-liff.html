@@ -624,8 +624,8 @@
         </div>
 
         <div class="space-y-2 pt-2">
-          <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider">最近核銷傳票 ({{ rawAccounting.length }})</h3>
-          <div v-for="acc in rawAccounting" :key="acc.accId" class="p-3 bg-white border border-slate-200 rounded-xl space-y-1 text-xs shadow-sm">
+<h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider">最近核銷傳票 ({{ rawAccounting.length }})</h3><button v-if="recentAccounting.length<rawAccounting.length" @click="accountingVisibleCount+=10" class="text-purple-700 underline text-sm">顯示更多傳票</button>
+          <div v-for="acc in recentAccounting" :key="acc.accId" class="p-3 bg-white border border-slate-200 rounded-xl space-y-1 text-xs shadow-sm">
             <div class="flex justify-between items-center">
               <span class="font-mono font-bold text-purple-700">{{ acc.accId }}</span>
               <span :class="(acc.settlementStatus === 'Settled' || acc.status === 'Settled') ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'" class="text-[10px] font-bold px-2 py-0.5 rounded-full">
@@ -839,7 +839,7 @@
   <div v-if="attendanceEditor.show" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"><div class="bg-white rounded-xl p-4 w-full max-w-lg scroll-dialog space-y-3"><h2 class="font-bold">逐人點名｜{{attendanceEditor.match?.matId}}</h2><div v-for="person in attendanceEditor.members" :key="person.id" class="border rounded-lg p-2 space-y-1"><p>{{person.name}} <small>{{person.groupName}}</small></p><select v-model="person.status" class="border rounded p-2 w-full"><option value="">尚未點名</option><option value="Present">出席</option><option value="Excused">請假</option><option value="Absent">缺席</option></select><input v-model="person.notes" placeholder="個別備註" class="border rounded p-2 w-full"></div><button @click="saveAdminAttendance" class="bg-purple-700 text-white rounded p-2 w-full">儲存點名</button><button @click="attendanceEditor.show=false" class="border rounded p-2 w-full">關閉</button></div></div>
   <div v-if="rosterEditor.show" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"><div class="bg-white rounded-xl p-4 w-full max-w-lg scroll-dialog space-y-3"><h2 class="font-bold">編輯個別名冊｜{{rosterEditor.match?.matId}}</h2><p class="text-xs">每人一列，可填組別。學員姓名必填。</p><div v-for="(person,i) in rosterEditor.roster" :key="person.id" class="flex gap-2"><input v-model="person.name" placeholder="姓名" class="border rounded p-2 flex-1"><input v-model="person.groupName" placeholder="組別" class="border rounded p-2 w-24"><button @click="rosterEditor.roster.splice(i,1)" class="text-red-700">移除</button></div><button @click="rosterEditor.roster.push({id:'NEW-'+Date.now()+'-'+Math.random().toString(36).slice(2),name:'',groupName:'',ownerUid:rosterEditor.match.studentUid})" class="border rounded p-2">加入學員</button><div class="flex gap-2"><button @click="saveRoster" class="bg-purple-700 text-white rounded p-2 flex-1">儲存名冊</button><button @click="rosterEditor.show=false" class="border rounded p-2">關閉</button></div></div></div>
   <nav v-if="isAdminApproved" class="bg-white border-t border-slate-200 fixed bottom-0 left-0 right-0 max-w-md md:max-w-xl mx-auto z-30 flex">
-    <button @click="currentTab='calendar'" :class="currentTab==='calendar'?'text-purple-700 font-bold':'text-slate-500'" class="flex-1 py-2 text-xs">📅<br>行事曆</button>
+    <button @click="currentTab='calendar';loadLearning()" :class="currentTab==='calendar'?'text-purple-700 font-bold':'text-slate-500'" class="flex-1 py-2 text-xs">📅<br>行事曆</button>
     <button @click="currentTab='attendance';loadLearning()" :class="currentTab==='attendance'?'text-purple-700 font-bold':'text-slate-500'" class="flex-1 py-2 text-xs">✅<br>點名補課</button>
     <button 
       @click="currentTab = 'matching'" 
@@ -993,6 +993,8 @@
       const rawCoaches = ref([]);
       const rawAdmins = ref([]);
       const rawAccounting = ref([]);
+      const accountingVisibleCount=ref(10);
+      const recentAccounting=computed(()=>rawAccounting.value.slice().reverse().slice(0,accountingVisibleCount.value));
       const rawPayroll = ref([]);
       const payrollApiReady = ref(false);
       const payrollBusy = ref(false);
@@ -1380,6 +1382,7 @@
       }
 
       async function confirmMatch(req) {
+        if(isProcessing.value)return;
         if(String(req.courseType||'').includes('初階')){
           const candidates=pendingRequests.value.filter(r=>r.reqId!==req.reqId && String(r.courseType||'').includes('初階') && r.preferredDate===req.preferredDate && r.timeSlot===req.timeSlot);
           if(candidates.length){const answer=prompt('同一時段可合班的需求單：\n'+candidates.map(r=>r.reqId+' '+r.studentName+'（'+r.studentCount+'人）').join('\n')+'\n請輸入要合班的 REQ 單號，以逗號分隔；不合班請留空。','');if(answer===null)return;req.linkedReqIds=answer.split(/[,，、\s]+/).map(s=>s.trim()).filter(Boolean);}
@@ -1419,8 +1422,8 @@
           });
           const result = await res.json();
           if (result.status === 'success') {
-            alert(`撮合排程成功！生成正式排程單號：${result.matId}`);
-            await loadAdminData();
+            proxySubmitMessage.value=`撮合排程已儲存：${result.matId}`;
+            if(result.match){allMatches.value.push(result.match);const ids=new Set([req.reqId,...(req.linkedReqIds||[])]);rawRequests.value.forEach(r=>{if(ids.has(r.reqId))r.status='Confirmed';});}else await loadAdminData();
           } else {
             alert('撮合失敗：' + result.message);
           }
@@ -1627,13 +1630,13 @@
           const result = await res.json();
           if (result.status !== 'success') throw new Error(result.message || '簽到失敗');
           completionForm.show = false;
-          await loadAdminData();
+          if(result.changes)Object.assign(completionForm.match,result.changes);else await loadAdminData();
           if (completionForm.isBasic) await loadLearning();
           currentTab.value = 'accounting';
           accountingSubView.value = 'slip';
           selectedMatId.value = matId;
           onSelectMatch();
-          alert('已保存完課回報，請核對實收與場地費後核銷。');
+          proxySubmitMessage.value='已保存完課回報，請核對實收與場地費後核銷。';
         } catch (err) { alert(err.message); }
         finally { isProcessing.value = false; }
       }
@@ -1744,8 +1747,13 @@
         if(!f.selectedCoaches.length || !f.reason.trim()) { alert('請選擇教練並填寫更正原因。'); return; }
         if(f.noTeaching && Number(f.acc.actualRevenue)!==0) { alert('未授課、僅場地費的實收學費須為 0 元。'); return; }
         isProcessing.value=true;
-        try { await payrollPost({action:'updateAccountingCoaches',accId:f.acc.accId,settlementCoaches:f.selectedCoaches,noTeaching:f.noTeaching,reason:f.reason}); f.show=false; await loadAdminData(); }
+        try { const result=await payrollPost({action:'updateAccountingCoaches',accId:f.acc.accId,settlementCoaches:f.selectedCoaches,noTeaching:f.noTeaching,reason:f.reason}); f.show=false; if(!applyFinance(result))await loadAdminData(); }
         catch(err) { alert('更正失敗：'+err.message); } finally { isProcessing.value=false; }
+      }
+      function applyFinance(result){
+        if(!result.finance)return false;
+        rawAccounting.value=result.finance.accounting||[];rawPayroll.value=result.finance.payroll||[];
+        selectedPayrollAccIds.value=selectedPayrollAccIds.value.filter(id=>ungroupedPayrollAccs.value.some(a=>a.accId===id));return true;
       }
       async function generateAccountingSlip() {
         if (!selectedMatId.value || !currentSelectedMatch.value) {
@@ -1776,9 +1784,10 @@
           const result = await res.json();
           if (result.status === 'success') {
             alert(`核銷傳票生成成功！單號：${result.accId}\n${Number(result.perCoachPay) < 0 ? '每位教練應負擔' : '每位教練實得'}：NT$ ${Math.abs(Number(result.perCoachPay))}`);
+            const match=allMatches.value.find(m=>m.matId===selectedMatId.value);if(match)match.status='Settled';
             selectedMatId.value = '';
             currentSelectedMatch.value = null;
-            await loadAdminData();
+            if(!applyFinance(result))await loadAdminData();
             accountingSubView.value = 'payroll';
           } else {
             alert('核銷失敗：' + result.message);
@@ -1806,7 +1815,7 @@
         try {
           const result = await payrollPost({ action: 'createPayrollGroup', accIds: selectedPayrollAccIds.value });
           selectedPayrollAccIds.value = [];
-          await loadAdminData();
+          if(!applyFinance(result))await loadAdminData();
           alert(`均分組已建立：NT$ ${Number(result.totalPool).toLocaleString()} 由 ${result.coachCount} 位教練平均分配。`);
         } catch (err) { alert('建立均分組失敗：' + err.message); }
         finally { payrollBusy.value = false; }
@@ -1817,7 +1826,7 @@
         payrollBusy.value = true;
         try {
           const result = await payrollPost({ action: 'dissolvePayrollGroup', groupId: group.groupId });
-          await loadAdminData();
+          if(!applyFinance(result))await loadAdminData();
           alert(result.message);
         } catch (err) { alert('拆除均分組失敗：' + err.message); }
         finally { payrollBusy.value = false; }
@@ -1831,7 +1840,7 @@
         try {
           const result = await payrollPost({ action: 'markPayrollPaid', payKey: item.payKey });
           alert(result.message || '該筆薪酬已標記發放結清！');
-          await loadAdminData();
+          if(!applyFinance(result))await loadAdminData();
         } catch (err) {
           alert('操作異常：' + err.toString());
         } finally {
@@ -1876,7 +1885,7 @@
           const profile=await liff.getProfile();
           adminProfile.userId=profile.userId; adminProfile.name=profile.displayName+' (幹部)';
           await loadAdminData();
-          if(isAdminApproved.value) await loadLearning();
+
         } catch(e) { authState.value='error'; authError.value=e.message || '登入失敗，請重試。'; }
       }
       onMounted(initializeAdmin);
@@ -1914,7 +1923,7 @@
         completedMatches,
         pendingCoaches,
         pendingAdmins,
-        rawAccounting,
+        rawAccounting, recentAccounting, accountingVisibleCount,
         rawPayroll, payrollApiReady, payrollBusy, selectedPayrollAccIds,
         ungroupedPayrollAccs, payrollSelectionPreview, payrollGroups,
         netCoachPool,
