@@ -45,7 +45,7 @@
           <div class="flex items-center space-x-1.5">
             <span class="font-bold text-sm">{{ userProfile.name }}</span>
             <span :class="isApproved ? 'bg-emerald-500' : 'bg-amber-500'" class="text-[10px] px-1.5 py-0.5 rounded font-medium">
-              {{ isApproved ? '認證教練' : '待審核' }}
+              {{authState==='loading'?'驗證中':authState==='error'?'連線異常':isApproved?'認證教練':'待審核'}}
             </span>
           </div>
           <p class="text-[10px] text-blue-200 font-mono">UID: {{ formatUid(userProfile.userId) }}</p>
@@ -64,7 +64,9 @@
   </header>
 
   <!-- 非白名單攔截視圖 -->
-  <main v-if="!isApproved" class="flex-1 p-5 flex flex-col justify-center">
+<p v-if="notice" role="status" class="p-3 bg-blue-50 text-blue-800">{{notice}}</p>
+<main v-if="authState==='loading'||authState==='error'" class="p-6 text-center"><p>{{authState==='loading'?'正在驗證教練身分…':authError}}</p><button v-if="authState==='error'" @click="initializeCoach" class="border rounded p-2">重試登入</button></main>
+  <main v-else-if="!isApproved" class="flex-1 p-5 flex flex-col justify-center">
     <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm text-center space-y-4">
       <div class="w-14 h-14 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto text-2xl font-bold">
         🛡️
@@ -278,7 +280,7 @@
             </button>
             <button 
               v-else
-              @click="claimInterest(req)"
+              @click="claimInterest(req)" :disabled="!!interestBusy"
               class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-sm transition"
             >
               我有意願承接此課程
@@ -519,6 +521,7 @@
   createApp({
     setup() {
       const isApproved = ref(false);
+      const authState=ref('loading'),authError=ref(''),notice=ref(''),interestBusy=ref('');
       const currentTab = ref('schedule');
       const isPublishing = ref(false);
       const isApplying = ref(false);
@@ -646,11 +649,12 @@
       }
 
       async function loadCoachData() {
+        if(!userProfile.userId)return;
         try {
           const res = await fetch(`${GAS_API_URL}?action=getCoachData&uid=${userProfile.userId}`);
           const data = await res.json();
           if (data.status === 'success') {
-            isApproved.value = data.isApproved;
+            isApproved.value = data.isApproved;authState.value='ready';
             if (data.serverNow) {
               const parsedServerNow = new Date(data.serverNow).getTime();
               if (!Number.isNaN(parsedServerNow)) serverNowMs.value = parsedServerNow;
@@ -658,9 +662,9 @@
             studentRequests.value = data.poolRequests || [];
             myMatches.value = data.myLessons || [];
             mySlots.value = data.mySlots || [];
-          }
+          } else { throw Error(data.message||'無法載入課表'); }
         } catch (err) {
-          console.error('教練資料同步失敗:', err);
+          authState.value='error';authError.value='課表讀取失敗，請重試。';console.error('教練資料同步失敗:', err);
         }
       }
 
@@ -691,6 +695,7 @@
       }
 
       async function publishSlot() {
+        if(isPublishing.value)return;
         isPublishing.value = true;
         const timeSlotString = `${slotForm.startTime} - ${slotForm.endTime}`;
         try {
@@ -709,8 +714,8 @@
           });
           const result = await res.json();
           if (result.status === 'success') {
-            alert(`空檔發布成功！單號：${result.slotId}`);
-            await loadCoachData();
+            notice.value=`空檔已發布：${result.slotId}`;
+            if(result.slot)mySlots.value.push(result.slot);else await loadCoachData();
           } else {
             alert('發布失敗：' + result.message);
           }
@@ -722,6 +727,7 @@
       }
 
       async function claimInterest(req) {
+        if(interestBusy.value)return;interestBusy.value=req.reqId;
         try {
           const payload = {
             action: 'expressCoachInterest',
@@ -736,14 +742,14 @@
           });
           const result = await res.json();
           if (result.status === 'success') {
-            alert('已成功登記承接意向！委員會將綜合評估後撮合。');
-            await loadCoachData();
+            notice.value='已登記承接意向，等待委員會撮合。';
+            if(result.interestedCoaches!==undefined){req.interestedCoaches=result.interestedCoaches;req.status=result.requestStatus;}else await loadCoachData();
           } else {
             alert('登記失敗：' + result.message);
           }
         } catch (err) {
           alert('連線異常：' + err.toString());
-        }
+        } finally { interestBusy.value=''; }
       }
 
       function openCheckinModal(match) {
@@ -824,12 +830,13 @@
         if (checkinModal.reportedRevenue === '' || !Number.isFinite(Number(checkinModal.reportedRevenue)) || Number(checkinModal.reportedRevenue) < 0) { alert('請填寫零或正數的實收金額。'); return; }
         if(String(checkinModal.targetMatch.courseType||'').includes('初階')){
           if(!checkinModal.roster.length || checkinModal.roster.some(x=>!x.status)){alert('請先完成全部學員的個別點名。');return;}
-          try{const result=await fetch(GAS_API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'saveBasicAttendance',accessToken:lineAccessToken(),matId:checkinModal.targetMatch.matId,entries:checkinModal.roster.map(x=>({memberId:x.id,status:x.status,notes:x.notes||''}))})}).then(r=>r.json());if(result.status!=='success')throw Error(result.message);}catch(e){alert('個別點名儲存失敗：'+e.message);return;}
+
         }
         isCheckingIn.value = true;
         try {
           const payload = {
             action: 'coachCompleteLesson',
+            attendanceEntries:String(checkinModal.targetMatch.courseType||'').includes('初階')?checkinModal.roster.map(x=>({memberId:x.id,status:x.status,notes:x.notes||''})):undefined,
             accessToken: lineAccessToken(),
             matId: checkinModal.targetMatch.matId,
             coachUid: userProfile.userId,
@@ -847,10 +854,9 @@
           });
           const result = await res.json();
           if (result.status === 'success') {
-            alert('完課簽到成功！資料已同步至委員會後台等待核銷記帳。');
+            notice.value='完課與點名已儲存，等待委員會核銷。';
             checkinModal.show = false;
-            await loadCoachData();
-            await loadSubstituteLessons();
+            if(result.changes){const m=myMatches.value.find(m=>m.matId===result.matId);if(m)Object.assign(m,result.changes);substituteLessons.value=substituteLessons.value.filter(m=>m.matId!==result.matId);}else await Promise.all([loadCoachData(),loadSubstituteLessons()]);
           } else {
             alert('簽到失敗：' + result.message);
           }
@@ -878,28 +884,20 @@
         window.open(gcalUrl, '_blank');
       }
 
-      onMounted(async () => {
-        if (COACH_LIFF_ID && typeof liff !== 'undefined') {
-          try {
-            await liff.init({ liffId: COACH_LIFF_ID });
-            if (!liff.isLoggedIn()) {
-              liff.login();
-              return;
-            }
-            const profile = await liff.getProfile();
-            userProfile.userId = profile.userId;
-            userProfile.name = profile.displayName + ' (教練)';
-          } catch (e) {
-            userProfile.userId = '';
-            console.warn('教練 LIFF 初始化異常:', e);
-          }
-        }
-        await loadCoachData();
-        await loadSubstituteLessons();
-      });
+      async function initializeCoach(){
+        authState.value='loading';authError.value='';
+        try{
+          if(!COACH_LIFF_ID||typeof liff==='undefined')throw Error('無法載入 LINE 登入，請重新開啟頁面。');
+          await liff.init({liffId:COACH_LIFF_ID});if(!liff.isLoggedIn()){liff.login();return;}
+          const profile=await liff.getProfile();userProfile.userId=profile.userId;userProfile.name=profile.displayName+' (教練)';
+          await Promise.all([loadCoachData(),loadSubstituteLessons()]);
+        }catch(e){authState.value='error';authError.value=e.message;}
+      }
+      onMounted(initializeCoach);
 
       return {
         learningMatches, loadBasicRoster, attendanceModal, openAttendanceModal, saveAttendanceOnly,
+        authState,authError,notice,interestBusy,initializeCoach,
         isApproved,
         currentTab,
         userProfile,
