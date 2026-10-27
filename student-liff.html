@@ -64,7 +64,9 @@
     <span>您目前已有 <strong>{{ maxActiveBookings }} 堂進行中</strong> 預約，已達上限。若需調整時段，請先請委員會取消其中一堂，再重新預約。</span>
   </div>
 
-  <main class="flex-1 p-4 overflow-y-auto">
+<div v-if="authState!=='ready'" role="status" class="p-6 text-center"><p>{{authState==='loading'?'正在登入並載入預約資料…':authError}}</p><button v-if="authState==='error'" @click="initializeStudent" class="border rounded p-2">重試登入</button></div>
+<p v-if="notice" role="status" class="p-3 text-emerald-800 bg-emerald-50">{{notice}}</p>
+  <main v-if="authState==='ready'" class="flex-1 p-4 overflow-y-auto">
 
     <!-- Tab 1: 我要提單 -->
     <section v-if="currentTab === 'request'" class="space-y-5">
@@ -154,13 +156,14 @@
         </div>
       </div>
 
-      <div v-if="form.courseType==='basic'" class="space-y-2"><label class="text-sm font-bold">逐人名冊</label><p class="text-xs text-slate-500">每行一位學員；可填「組別|姓名」，例如「A組|王小明」。委員會可與其他組別合班。</p><textarea v-model="basicNamesText" rows="5" placeholder="A組|王小明\nA組|李小華" class="w-full border rounded-lg p-3"></textarea><p class="text-xs">已填 {{basicNamesText.split(/\r?\n/).filter(x=>x.trim()).length}}／{{form.studentCount}} 人</p></div>
+      <div v-if="form.courseType==='basic'" class="space-y-2"><strong>上課學員姓名</strong><label v-for="(person,index) in studentNameFields.slice(0,Number(form.studentCount))" :key="index" class="block text-sm">第 {{index+1}} 位學員<input v-model.trim="person.name" maxlength="80" :placeholder="'請填第 '+(index+1)+' 位姓名'" class="w-full border rounded-lg p-3 mt-1"></label><p class="text-xs text-slate-500">選擇幾人就填寫幾位姓名，可個別報名，由委員會安排成班。</p></div>
       <!-- 日期與 24 小時制精確時間設定 -->
       <div v-if="form.courseType === 'basic'" class="space-y-3">
         <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-900">
           <p class="font-bold">初階 5 堂套課需逐堂設定日期與時間</p>
           <p class="mt-1">目前已有 {{ activeBookingsCount }} 堂進行中，本次最多可新增 {{ remainingBookingSlots }} 堂。每堂可安排在不同日期，不要求連續週次。</p>
         </div>
+        <button type="button" @click="fillWeeklySessions" class="border border-emerald-300 text-emerald-800 rounded-lg p-3 text-sm">依第一堂每週補齊尚未填寫的課次</button>
         <div
           v-for="(session, idx) in basicSessions.slice(0, remainingBookingSlots)"
           :key="idx"
@@ -428,7 +431,7 @@
       <span class="text-[11px] mt-0.5">即時空檔</span>
     </button>
     <button 
-      @click="currentTab = 'myBookings'" 
+      @click="currentTab = 'myBookings'; loadMyLearning()" 
       :class="currentTab === 'myBookings' ? 'text-emerald-700 font-bold' : 'text-slate-400 hover:text-slate-600'"
       class="flex-1 py-2.5 flex flex-col items-center justify-center text-xs transition relative"
     >
@@ -490,12 +493,14 @@
   createApp({
     setup() {
       const userProfile = reactive({
-        userId: 'Ud471b1a7217b649b3599b54700d352c9',
-        name: '杜和益 (學員)'
+        userId: '',
+        name: '登入中'
       });
 
       const currentTab = ref('request');
       const isSubmitting = ref(false);
+      const authState=ref('loading'), authError=ref(''), notice=ref(''), cancelling=ref('');
+      let packageAttempt=null;
       const coachList = ref([{ uid: '', name: '杜和益 教練' }]);
       const maxActiveBookings = 5;
 
@@ -589,26 +594,18 @@
         feeText: ''
       });
 
-      onMounted(async () => {
-        if (MY_LIFF_ID && typeof liff !== 'undefined') {
-          try {
-            await liff.init({ liffId: MY_LIFF_ID });
-            if (!liff.isLoggedIn()) {
-              liff.login();
-              return;
-            }
-            const profile = await liff.getProfile();
-            userProfile.userId = profile.userId;
-            userProfile.name = profile.displayName;
-          } catch (err) {
-            console.warn('LIFF 載入失敗，採用預設身分:', err);
-          }
-        }
-        await loadStudentData();
-        await loadMyLearning();
-      });
-
+      async function initializeStudent(){
+        authState.value='loading';authError.value='';
+        try{
+          if(!MY_LIFF_ID||typeof liff==='undefined')throw Error('無法載入 LINE 登入，請重新開啟頁面。');
+          await liff.init({liffId:MY_LIFF_ID});if(!liff.isLoggedIn()){liff.login();return;}
+          const profile=await liff.getProfile();userProfile.userId=profile.userId;userProfile.name=profile.displayName;
+          await loadStudentData();
+        }catch(e){authState.value='error';authError.value=e.message;}
+      }
+      onMounted(initializeStudent);
       async function loadStudentData() {
+        if(!userProfile.userId)return;
         try {
           const res = await fetch(`${GAS_API_URL}?action=getStudentData&uid=${userProfile.userId}`);
           const data = await res.json();
@@ -656,10 +653,10 @@
                 resolutionReason: r.resolutionReason || ''
               });
             });
-            myBookings.value = combined;
-          }
+            myBookings.value = combined; authState.value='ready';
+          } else { throw Error(data.message||'載入資料失敗'); }
         } catch (err) {
-          console.error('學員端資料同步失敗:', err);
+          authState.value='error';authError.value='讀取失敗，請重試。';console.error('學員端資料同步失敗:', err);
         }
       }
 
@@ -702,11 +699,22 @@
       }
 
       const basicNamesText=ref('');
+      const studentNameFields=reactive(Array.from({length:6},()=>({name:''})));
+      function fillWeeklySessions(){
+        const first=basicSessions[0];if(!first.date)return;
+        const base=new Date(first.date+'T00:00:00Z');
+        basicSessions.forEach((session,i)=>{if(i && !session.date){const d=new Date(base);d.setUTCDate(d.getUTCDate()+7*i);session.date=d.toISOString().slice(0,10);session.startTime=first.startTime;session.endTime=first.endTime;}});
+      }
       const myLearning=reactive({attendance:[],makeup:[]});
       const myAbsenceSummary=computed(()=>{const map=new Map();for(const x of myLearning.attendance){const item=map.get(x.memberId)||{memberId:x.memberId,name:x.memberName,absent:0,excused:0,pending:0};if(x.status==='Absent')item.absent++;if(x.status==='Excused')item.excused++;if(['Absent','Excused'].includes(x.status)&&!myLearning.makeup.some(m=>m.sourceAttendanceId===x.attendanceId&&m.status==='Completed'))item.pending++;map.set(x.memberId,item);}return [...map.values()];});
       async function loadMyLearning(){try{const data=await postStudentRequest({action:'getLearningData',accessToken:typeof liff!=='undefined'&&liff.isLoggedIn()?liff.getAccessToken():''});if(data.status==='success'){myLearning.attendance=data.attendance||[];myLearning.makeup=data.makeup||[];}}catch(e){console.error('補課紀錄讀取失敗',e);}}
       async function requestMyMakeup(x){try{const data=await postStudentRequest({action:'requestBasicMakeup',accessToken:liff.getAccessToken(),attendanceId:x.attendanceId});if(data.status!=='success')throw Error(data.message);await loadMyLearning();alert('已送出補課申請，等待委員會安排。');}catch(e){alert(e.message);}}
+      function addSavedRequest(r){
+        if(myBookings.value.some(b=>b.id===r.reqId))return;
+        myBookings.value.push({id:r.reqId,reqId:r.reqId,courseTitle:r.courseType,date:r.preferredDate,timeSlot:r.timeSlot,coach:r.designatedCoach,venue:r.venuePreference,fee:String(r.courseType).includes('初階')?Number(r.studentCount)*300:Number(r.studentCount)<=2?1400:1500,status:r.status});
+      }
       async function submitRequest() {
+        if(isSubmitting.value)return;
         if (activeBookingsCount.value >= maxActiveBookings) {
           alert(`您已有 ${maxActiveBookings} 堂進行中預約，已達上限！`);
           return;
@@ -726,7 +734,8 @@
           };
 
           if (form.courseType === 'basic') {
-            const participants=basicNamesText.value.split(/\r?\n/).map(x=>{const parts=x.split('|');return {name:(parts.pop()||'').trim(),groupName:parts.join('|').trim()};}).filter(x=>x.name);
+            const namesText=studentNameFields.some(p=>p.name)?studentNameFields.slice(0,Number(form.studentCount)).map(p=>p.name).join('\n'):basicNamesText.value;
+            const participants=namesText.split(/\r?\n/).map(x=>{const parts=x.split('|');return {name:(parts.pop()||'').trim(),groupName:parts.join('|').trim()};}).filter(x=>x.name);
             if(participants.length!==Number(form.studentCount))throw Error('請逐一填寫全部 '+form.studentCount+' 位學員姓名。');
             const countToSubmit = remainingBookingSlots.value;
             const sessions = basicSessions.slice(0, countToSubmit);
@@ -741,8 +750,7 @@
 
             const seriesId = `SER-${Date.now()}`;
             const reqIds = [];
-            for (let i = 0; i < sessions.length; i += 1) {
-              const session = sessions[i];
+            const items=sessions.map((session,i)=>{
               const isFullPackage = countToSubmit === 5;
               const courseTitle = isFullPackage
                 ? `初階團體培訓班 (${form.studentCount}人) [套課第${i + 1}/5堂]`
@@ -750,7 +758,7 @@
               const marker = isFullPackage
                 ? `[套課 ${seriesId} 第${i + 1}/5堂]`
                 : `[套課補排 ${seriesId}]`;
-              const result = await postStudentRequest({
+              return {
                 ...basePayload,
                 courseType: courseTitle,
                 preferredDate: session.date,
@@ -760,12 +768,15 @@
                 sessionNo: isFullPackage ? i + 1 : '',
                 totalSessions: 5,
                 notes: `${marker}${form.notes ? ' ' + form.notes : ''}`
-              });
-              if (result.status !== 'success') {
-                throw new Error(`第 ${i + 1} 堂提單失敗：${result.message || '未知錯誤'}`);
-              }
-              reqIds.push(result.reqId);
-            }
+              };
+            });
+            const signature=JSON.stringify(items.map(({seriesId,notes,...r})=>r))+String(form.notes||'');
+            if(!packageAttempt||packageAttempt.signature!==signature)packageAttempt={signature,id:'PKG_'+Date.now()+'_'+Math.random().toString(36).slice(2),items};
+            else items.splice(0,items.length,...packageAttempt.items);
+            const batch=await postStudentRequest({action:'submitStudentRequests',accessToken:liff.getAccessToken(),submissionId:packageAttempt.id,items});
+            if(batch.status!=='success')throw Error(batch.message||'套課送出失敗，請先查看我的預約再重試。');
+            (batch.requests||[]).forEach(r=>{reqIds.push(r.reqId);addSavedRequest(r);});
+            packageAttempt=null;
 
             successModal.reqId = reqIds.length === 1 ? reqIds[0] : `${reqIds[0]} 等 ${reqIds.length} 筆`;
             successModal.courseTitle = `初階團體培訓班 (${form.studentCount}人)`;
@@ -784,6 +795,7 @@
               notes: form.notes
             });
             if (result.status !== 'success') throw new Error(result.message || '提單失敗');
+            if(result.request)addSavedRequest(result.request);else await loadStudentData();
 
             successModal.reqId = result.reqId;
             successModal.courseTitle = courseTitle;
@@ -792,7 +804,6 @@
             successModal.feeText = `NT$ ${calculateFee().toLocaleString()}（整堂總價）`;
             successModal.show = true;
           }
-          await loadStudentData();
         } catch (err) {
           alert('提單失敗：' + (err?.message || err.toString()));
         } finally {
@@ -837,8 +848,10 @@
       }
 
       async function cancelBooking(booking) {
+        if(cancelling.value)return;
         if (!confirm(`確定要取消預約單號 ${booking.id} 嗎？`)) return;
 
+        cancelling.value=booking.id;
         try {
           const idType = booking.id.startsWith('REQ') ? 'REQ' : 'MAT';
           const res = await fetch(GAS_API_URL, {
@@ -853,14 +866,13 @@
           });
           const result = await res.json();
           if (result.status === 'success') {
-            alert('該預約已取消成功！');
-            await loadStudentData();
+            booking.status='Cancelled_User';notice.value='預約 '+booking.id+' 已取消。';
           } else {
             alert('取消失敗：' + result.message);
           }
         } catch (err) {
           alert('連線異常：' + err.toString());
-        }
+        } finally { cancelling.value=''; }
       }
 
       function addToCalendar(booking) {
@@ -917,6 +929,8 @@
       return {
         userProfile,
         currentTab,
+        authState,authError,initializeStudent,notice,cancelling,
+        studentNameFields,fillWeeklySessions,
         isSubmitting,
         coachList,
         coachOptions,
